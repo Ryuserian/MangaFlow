@@ -163,7 +163,6 @@ src/
 ## 📝 개발 메모(요약)
 - 번역/VLM은 **in-process LLamaSharp 0.30**(네이티브 DLL 직접 로드, macOS `.0.dylib` 심링크·CUDA는 csproj 타깃으로 OS 분기 자동 스테이징
 - 입력 JPEG는 progressive(SOF 0xC2) → ImageSharp 2.1.9 디코딩 후 Skia 인도
-- 참고 저장소(설계만, 코드 복사 금지): `zyddnys/manga-image-translator`(GPL)
 
 ## 라이선스
 MIT (앱 코드). 모델 라이선스는 위 표를 따릅니다 — 배포 전 각 모델 페이지를 확인하세요.
