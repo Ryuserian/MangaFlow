@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>MangaTranslator.Core</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Core는 외부 의존성 0. 순수 픽셀 버퍼 + 인터페이스만 다룬다.
+       이미지 디코딩/인코딩과 폰트 렌더링은 App(Avalonia) 레이어에서 전담. -->
+
+</Project>

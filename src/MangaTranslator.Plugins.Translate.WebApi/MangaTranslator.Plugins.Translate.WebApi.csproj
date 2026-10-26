@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MangaTranslator.Core\MangaTranslator.Core.csproj" />
+    <!-- 외부 번역 API(google/deepl/openai호환) — BCL(HttpClient+System.Text.Json)만 사용, 패키지 불요 -->
+  </ItemGroup>
+
+</Project>
