@@ -114,7 +114,7 @@ dotnet run --project src/MangaTranslator.App -- --getmodel font.noto_sans_kr
 
 - **GPU 자동 정책(2026-10-25)**: macOS=Metal(llama.cpp) / Windows·Linux=CUDA 우선, GPU 없거나 초기화 실패 시 **CPU 자동 폴백**(llama.cpp ggml soft-fail + ONNX `OnnxSessionFactory.CreateWithCpuFallback`). CUDA EP 부재는 프로세스당 1회 감지 후 재시도 생략
 - **⚡ CUDA DLL — 설치 없이 GPU(portable)**:
-  - **Release zip 사용(권장)**: Releases의 `v1.0.0` Windows zip에는 `ggml-cuda.dll`·`cublas64_13.dll`·`cuDNN 9` 세트(≈1.5GB)가 exe와 같은 폴더에 동봉됩니다. **CUDA Toolkit/cuDNN 설치 없이** RTX GPU 가속이 즉시 동작(Windows DLL 탐색 1순위 = exe 폴더). zip에 **모델은 포함되지 않음** — 첫 실행 때 스플래시 자동 다운로더가 수신(≈37GB).
+  - **CUDA Toolkit/cuDNN 설치 없이** RTX GPU 가속이 즉시 동작(Windows DLL 탐색 1순위 = exe 폴더). zip에 **모델은 포함되지 않음** — 첫 실행 때 스플래시 자동 다운로더가 수신(≈37GB).
   - **직접 빌드(git clone)**: 저장소는 코드만 담습니다(100MB/파일 제한). CUDA Toolkit+cuDNN이 설치된 PC에서는 실행 시 설치 경로 PATH 자동주입으로 GPU 사용, 미설치 PC는 CPU 폴백. GPU 배포판으로 재패키지하려면 `dotnet publish -c Release -r win-x64 --self-contained true` 후 설치본의 `cublas64_*·cublasLt64_*·cudart64_*·cudnn*_64_*` DLL을 exe 폴더에 복사(전체 세트 필수—부분 동봉 시 cuDNN 오류).
   - 오버라이드 env: `LLAMA_NGL`/`VLM_NGL`(GGUF GPU 층 수, 기본 99 전층)·`ORT_CPU=1`(ONNX 강제 CPU)·`ORTGpu=false`(빌드 시 CPU ONNX)
 - 오버라이드 env: `LLAMA_NGL`/`VLM_NGL`(GGUF GPU 층 수, 기본 99 전층)·`ORT_CPU=1`(ONNX 강제 CPU)·`ORTGpu=false`(빌드 시 CPU 패키지 고정)
@@ -161,9 +161,8 @@ src/
 엔진 교체: `EngineContext`에 팩토리 등록 + 카탈로그 키 — 파이프라인·UI 무접촉.
 
 ## 📝 개발 메모(요약)
-- 번역/VLM은 **in-process LLamaSharp 0.30**(네이티브 DLL 직접 로드, llama-server subprocess 폐기). macOS `.0.dylib` 심링크·CUDA는 csproj 타깃으로 OS 분기 자동 스테이징
+- 번역/VLM은 **in-process LLamaSharp 0.30**(네이티브 DLL 직접 로드, macOS `.0.dylib` 심링크·CUDA는 csproj 타깃으로 OS 분기 자동 스테이징
 - 입력 JPEG는 progressive(SOF 0xC2) → ImageSharp 2.1.9 디코딩 후 Skia 인도
-- 상세 검증 기록: `TEST_GUIDE.md` 및 커밋 로그
 - 참고 저장소(설계만, 코드 복사 금지): `zyddnys/manga-image-translator`(GPL)
 
 ## 라이선스
