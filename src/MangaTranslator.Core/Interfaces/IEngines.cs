@@ -1,4 +1,5 @@
 using MangaTranslator.Core.Imaging;
+using MangaTranslator.Core;
 
 namespace MangaTranslator.Core.Interfaces;
 
@@ -53,8 +54,11 @@ public interface ITranslationEngine
     string Name { get; }
     int MaxConcurrentSentences { get; }
     bool RequiresGpu { get; }
+    /// <summary>tones: 화자 말투 힌트(동일 길이, null=전부 Auto). LLM 엔진은 (남)/(여) 마커로
+    /// 어투를 맞추고, seq2seq(google·deepl) 엔진은 무시한다.</summary>
     Task<IReadOnlyList<string>> TranslateAsync(
-        IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct = default);
+        IReadOnlyList<string> texts, string sourceLang, string targetLang,
+        IReadOnlyList<SpeechTone>? tones = null, CancellationToken ct = default);
 }
 
 /// <summary>⑤ 번역문을 같은 위치·비슷한 스타일로 재조판.</summary>

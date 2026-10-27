@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using MangaTranslator.Core;
 using MangaTranslator.Core.Interfaces;
 using MangaTranslator.Core.Translate;
 
@@ -36,8 +37,11 @@ public sealed class WebTranslateEngine : ITranslationEngine, IDisposable
             ? Math.Clamp(c, 1, 8) : 4;
 
     public async Task<IReadOnlyList<string>> TranslateAsync(
-        IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct = default)
+        IReadOnlyList<string> texts, string sourceLang, string targetLang,
+        IReadOnlyList<SpeechTone>? tones = null, CancellationToken ct = default)
     {
+        // seq2seq(google·deepl)은 말투 힌트 미소비 — openai만 컨텍스트로 활용 가능(현행 무시).
+        _ = tones;
         return Provider.ToLowerInvariant() switch
         {
             "deepl" => await TranslateDeepLAsync(texts, ct),

@@ -5,6 +5,7 @@ using LLama.Batched;
 using LLama.Common;
 using LLama.Native; // DecodeResult
 using LLama.Sampling;
+using MangaTranslator.Core;
 using MangaTranslator.Core.Interfaces;
 using MangaTranslator.Core.Translate;
 
@@ -36,7 +37,10 @@ public sealed class QwenGgufTranslateEngine : ITranslationEngine, ILoadableEngin
         "당신은 일본어 만화 전문 한국어 번역가다. 만화 대사를 자연스러운 구어체 한국어로 번역한다. " +
         "입력과 같은 수의 줄, 각 줄 '번호. 한국어'. 설명·인사말·출처 금지. " +
         "일본어 혼용 출력 금지 — 반드시 한국어로. 이미 한국어면 다듬어 출력. " +
-        "캐릭터 말투(존댓말/반말)와 뉘앙스·의성어를 살린다. 말풍선 길이 제약이 있으므로 간결하게.";
+        "캐릭터 말투(존댓말/반말)와 뉘앙스·의성어를 살린다. 말풍선 길이 제약이 있으므로 간결하게. " +
+        "대사 뒤에 (여) 또는 (남) 마커가 붙으면 그 화자의 성별·성격에 맞는 한국어 말투를 쓴다 — " +
+        "(여): 여성스러운 어미(～년/～다/～잖아·부드러운 종결), (남): 남성적인 어미(～다/～는데/～냐·건장한 종결). " +
+        "마커가 없거나 (자)면 문맥(私/僕/あた시 등)으로 화자를 추정한다. 마커는 절대 출력하지 않는다.";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _loadLock = new();
@@ -96,7 +100,8 @@ public sealed class QwenGgufTranslateEngine : ITranslationEngine, ILoadableEngin
 
     // ---------- 번역 ----------
     public async Task<IReadOnlyList<string>> TranslateAsync(
-        IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct = default)
+        IReadOnlyList<string> texts, string sourceLang, string targetLang,
+        IReadOnlyList<SpeechTone>? tones = null, CancellationToken ct = default)
     {
         if (texts.Count == 0) return Array.Empty<string>();
         await _gate.WaitAsync(ct);
@@ -104,22 +109,48 @@ public sealed class QwenGgufTranslateEngine : ITranslationEngine, ILoadableEngin
         {
             await Task.Run(EnsureLoaded, ct); // 14B 디스크→VRAM 로드: UI 스레드 차단 금지
 
-            var batch = await Task.Run(() => Generate(NumberedBatchProtocol.BuildPrompt(texts),
-                Math.Min(2048, 96 + EstimateChars(texts))), ct);
+            // 말투 마커(사용자 2026-10-27): (여)/(남)/(자)=auto — 프롬프트에만 주입, 출력은 원줄과 1:1
+            var prompted = WithToneMarkers(texts, tones);
+            var batch = await Task.Run(() => Generate(NumberedBatchProtocol.BuildPrompt(prompted),
+                Math.Min(2048, 96 + EstimateChars(prompted))), ct);
             var parsed = NumberedBatchProtocol.Parse(batch, texts.Count);
             if (parsed != null) return parsed;
 
-            // 폴백: 개별 라인
+            // 폴백: 개별 라인(개별에도 마커 유지 — Parse 실패 라인만 재역)
             var outp = new List<string>(texts.Count);
-            foreach (var t in texts)
+            for (var i = 0; i < texts.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                var one = await Task.Run(() => Generate(t, 96 + t.Length * 2), ct);
+                var one = await Task.Run(() => Generate(prompted[i], 96 + texts[i].Length * 2), ct);
                 outp.Add(NumberedBatchProtocol.Clean(one));
             }
             return outp;
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>texts[i] 뒤에 말투 마커 부기. 전부 Auto면 원본 그대로(마크업 0).
+    /// tones=null/mismatch → env TRANSLATE_TONE(female|male)이 페이지만지 전 페이지 기본말투(CLI smoke용).</summary>
+    private static IReadOnlyList<string> WithToneMarkers(IReadOnlyList<string> texts, IReadOnlyList<SpeechTone>? tones)
+    {
+        if (tones == null || tones.Count != texts.Count)
+        {
+            var env = Environment.GetEnvironmentVariable("TRANSLATE_TONE")?.ToLowerInvariant();
+            var dflt = env is "female" or "여" ? SpeechTone.Female : env is "male" or "남" ? SpeechTone.Male : SpeechTone.Auto;
+            if (dflt == SpeechTone.Auto) return texts;
+            tones = texts.Select(_ => dflt).ToList();
+        }
+        var any = tones.Any(t => t != SpeechTone.Auto);
+        if (!any) return texts;
+        var outp = new List<string>(texts.Count);
+        for (var i = 0; i < texts.Count; i++)
+            outp.Add(tones[i] switch
+            {
+                SpeechTone.Female => texts[i] + " (여)",
+                SpeechTone.Male => texts[i] + " (남)",
+                _ => texts[i],
+            });
+        return outp;
     }
 
     private static int EstimateChars(IReadOnlyList<string> texts)

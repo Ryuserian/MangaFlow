@@ -90,7 +90,7 @@
       <StackPanel Spacing="2">
         <!-- 읽기 방향 ComboBox(사용자 2026-10-26): 가로/세로 × 시작(왼쪽/오른쪽) 4택.
              아이콘: 활살(arrowhead) 위치 = 첫 행/열의 시작 변. 한국어 번역 기본=가로 왼쪽부터. -->
-        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
           <CheckBox IsChecked="{Binding Include, Mode=TwoWay}"
                   ToolTip.Tip="번역 대상 — 체크된 말풍선만 일본어 제거 + 번역 + 재조판. 해제 시 원본 보존"/>
           <TextBlock Grid.Column="1" Text="번역" FontSize="10" Foreground="#8C1D2129"
@@ -111,14 +111,19 @@
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <TextBlock Grid.Column="3" Text="{Binding Text}" Margin="6,0,4,0"
+          <!-- 말투 ComboBox(사용자 2026-10-27): 번역 어투 성별 힌트 — 자동/여성형/남성형 -->
+          <ComboBox Grid.Column="3" ItemsSource="{x:Static vm:TextInstanceViewModel.ToneOptions}"
+                   SelectedItem="{Binding ToneOption, Mode=TwoWay}"
+                   FontSize="11" Padding="4,1" Width="92" Height="24" MinHeight="24" Margin="4,0,0,0"
+                   ToolTip.Tip="말투 — 여성형/남성형 어투로 번역. 자동이면 원문(私/僕 등)으로 추정"/>
+          <TextBlock Grid.Column="4" Text="{Binding Text}" Margin="6,0,4,0"
                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                    Foreground="{Binding Confidence, Converter={x:Static conv:ConfidenceLowToBrushConverter.Instance}}"
                    FontSize="12"
                    Opacity="{Binding Include, Converter={x:Static conv:IncludeToOpacityConverter.Instance}}"/>
-          <Button Grid.Column="4" Content="🔄" Classes="flat" Command="{Binding ReocrCommand}"
+          <Button Grid.Column="5" Content="🔄" Classes="flat" Command="{Binding ReocrCommand}"
                   ToolTip.Tip="이 사각형만 OCR 재인식" Padding="6,2"/>
-          <Button Grid.Column="5" Content="✕" Classes="flat" Command="{Binding RemoveCommand}" Padding="6,2"/>
+          <Button Grid.Column="6" Content="✕" Classes="flat" Command="{Binding RemoveCommand}" Padding="6,2"/>
         </Grid>
         <!-- 저신뢰 경고: 빨간 라벨 -->
         <TextBlock Text="⚠ 인식 신뢰도 낮음 — 원문을 확인하세요" FontSize="9" Foreground="#FFD92D20"

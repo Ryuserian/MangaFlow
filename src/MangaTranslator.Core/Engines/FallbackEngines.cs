@@ -59,7 +59,8 @@ public sealed class PassthroughTranslationEngine : ITranslationEngine
     public int MaxConcurrentSentences => 64;
     public bool RequiresGpu => false;
     public Task<IReadOnlyList<string>> TranslateAsync(
-        IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct = default)
+        IReadOnlyList<string> texts, string sourceLang, string targetLang,
+        IReadOnlyList<SpeechTone>? tones = null, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>(texts);
 }
 

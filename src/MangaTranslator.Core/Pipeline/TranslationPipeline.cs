@@ -76,7 +76,8 @@ public sealed class TranslationPipeline
         MaybeUnload(_ocr, "apply-before-translate"); // Review 종료=OCR GGUF 해방 → 번역 GGUF 순차 상재
         HoldOcrLoaded = false;
         var texts = regions.Select(r => r.Text).ToList();
-        var translated = await _translate.TranslateAsync(texts, sourceLang, targetLang, ct);
+        var tones = regions.Select(r => r.Tone).ToList();
+        var translated = await _translate.TranslateAsync(texts, sourceLang, targetLang, tones, ct);
         // 전각→반각(사용자 피드백): 편집 UI 텍스트·렌더가 일관되게 반각
         for (int i = 0; i < regions.Count; i++) regions[i].TranslatedText = TextNormalizer.ToHalfWidth(translated[i]);
         MaybeUnload(_translate, "translate"); // 18GB 번역 GGUF 해제 — 렌더는 CPU(Skia)

@@ -47,6 +47,11 @@ public sealed class SkiaFontRenderer : ITextRenderer, ILoadableEngine, IDisposab
     /// halo 색은 fill과 반대: 검은 글자→흰 halo, 흰 글자→검은 halo(만화 표준 가독성 처리).</summary>
     public float OutlineWidth { get; set; } = FEnv("RENDER_OUTLINE", 0.18f, 0f, 0.5f);
 
+    /// <summary>세로 렌더 복귀 스위치(env RENDER_VERT=1). 기본 off —
+    /// 사용자 규칙(2026-10-27): 한국어는 무조건 가로 재조판(행 위→아래 순서).
+    /// OCR 세로 탐지(ReadingDir)는 기본 무시, env로만 만화식 세로 복원.</summary>
+    public static bool RenderVertical => Environment.GetEnvironmentVariable("RENDER_VERT") == "1";
+
     private static float EffMin(float minFs, float scale) => minFs > 0 ? minFs * Math.Clamp(scale, 0.4f, 3f) : 0f;
 
     private SKTypeface? _regular;
@@ -113,9 +118,11 @@ public sealed class SkiaFontRenderer : ITextRenderer, ILoadableEngine, IDisposab
             $"[render] {(r.Vertical?"V":"H")} box={box.Width}x{box.Height} srcCharPx={srcCharPx:0} " +
             $"scale={scale:0.00} text[{text.Length}]='{(text.Length > 12 ? text[..12] : text)}'");
 
-        // 사용자 규칙(2026-10-26): 방향은 ReadingDir 단일 진실원 — 한국어 기본=가로 왼쪽부터 채움.
-        if (r.Vertical) DrawVertical(canvas, text, box, typeface, fill, halo, srcCharPx, scale, r.ColumnRightToLeft);
-        else DrawHorizontal(canvas, text, box, typeface, fill, halo, srcCharPx, scale, r.ColumnRightToLeft);
+        // 사용자 규칙(2026-10-27): 한국어는 항상 가로 재조판 — 행 위→아래 순서, 단어(어절) 단위 줄바꿈.
+        // OCR 세로 탐지는 기본 무시(RENDER_VERT=1로만 복원). 가로 우좌 채움은 명시적 HorizontalRightToLeft만.
+        if (RenderVertical && r.Vertical) DrawVertical(canvas, text, box, typeface, fill, halo, srcCharPx, scale, r.ColumnRightToLeft);
+        else DrawHorizontal(canvas, text, box, typeface, fill, halo, srcCharPx, scale,
+            r.ReadingDir == ReadingDir.HorizontalRightToLeft);
     }
 
     /// <summary>박스 내 배경 밝기 표본 → 밝으면 거의 검정, 어두우면 흰색 글자. (inpaint 후 채움 영역 표본)</summary>
@@ -192,22 +199,69 @@ public sealed class SkiaFontRenderer : ITextRenderer, ILoadableEngine, IDisposab
         }
     }
 
+    /// <summary>사용자 규칙(2026-10-27) 3단 줄나눔 판단 기준:
+    /// ① '/' = 강제 개행(수동 제어, 슬래쉬 기호는 제거하고 줄바꿈)
+    /// ② 말줄임표(… / ...)·문장부호(. , ! ? ; :) 경계 = 어구 자동 분할 → 새 행
+    /// ③ 그 외 = 어절(word) 단위 wrap — 단어를 자르지 않고 넘치면 다음 줄로.
+    /// 단어 자체가 maxW를 넘으면 그 단어만 글자 절단(오버플로 안전판).</summary>
     private static List<string> Wrap(string text, SKPaint paint, int maxW)
     {
+        if (maxW < 1) maxW = 1;
         var lines = new List<string>();
-        var cur = new System.Text.StringBuilder();
-        foreach (var ch in text)
+        foreach (var chunk in SplitPhrases(text))
         {
-            cur.Append(ch);
-            if (paint.MeasureText(cur.ToString()) > maxW && cur.Length > 1)
+            var cur = "";
+            foreach (var word in chunk.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
-                cur.Length--;
-                lines.Add(cur.ToString());
-                cur.Clear(); cur.Append(ch);
+                if (cur.Length == 0) { cur = word; continue; }
+                if (paint.MeasureText(cur + " " + word) <= maxW) cur += " " + word;
+                else { lines.Add(cur); cur = word; }
+            }
+            if (cur.Length > 0) lines.Add(cur);
+        }
+        if (lines.Count == 0) lines.Add("");
+
+        // 안전판: 혼자 폭을 넘는 줄만 글자 절단
+        var safe = new List<string>(lines.Count);
+        foreach (var ln in lines)
+        {
+            var s = ln;
+            while (paint.MeasureText(s) > maxW && s.Length > 1)
+            {
+                var cut = s.Length;
+                while (cut > 1 && paint.MeasureText(s[..cut]) > maxW) cut--;
+                safe.Add(s[..cut]);
+                s = s[cut..];
+            }
+            safe.Add(s);
+        }
+        return safe;
+    }
+
+    /// <summary>'/' 강제 개행 → 선두 말줄임표 분리 → 첫 문장부호 뒤로 어구 분할.</summary>
+    private static IEnumerable<string> SplitPhrases(string text)
+    {
+        foreach (var raw in text.Split('/'))
+        {
+            var s = raw.Trim();
+            if (s.Length == 0) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(s, @"^(…|\.{2,})(.+)$", System.Text.RegularExpressions.RegexOptions.Singleline);
+            if (m.Success) { yield return m.Groups[1].Value; s = m.Groups[2].Value.TrimStart(); }
+            while (s.Length > 0)
+            {
+                var cut = -1;
+                for (var i = 0; i < s.Length - 1; i++)
+                {
+                    var c = s[i];
+                    if (c != '.' && c != ',' && c != '!' && c != '?' && c != ';' && c != ':') continue;
+                    if (char.IsDigit(s[i + 1])) continue; // '3.14' 소수점 보호
+                    cut = i; break;
+                }
+                if (cut < 0) { yield return s.Trim(); break; }
+                yield return s[..(cut + 1)].Trim();
+                s = s[(cut + 1)..].Trim();
             }
         }
-        if (cur.Length > 0) lines.Add(cur.ToString());
-        return lines;
     }
 
     // ---------- 세로: 열 방향(우→좌 만화 관행 / 좌→우 한국식) grow-until-fit ----------

@@ -8,6 +8,9 @@ namespace MangaTranslator.App.ViewModels;
 /// <summary>읽기 방향 ComboBox 항목: 값+라벨+아이콘(Path Data). MainWindow.axaml DataTemplate이 참조.</summary>
 public sealed record ReadingDirOption(ReadingDir Dir, string Label, string IconData);
 
+/// <summary>말투 ComboBox 항목(사용자 2026-10-27): 번역 어투 성별·성격 힌트.</summary>
+public sealed record ToneOption(SpeechTone Tone, string Label);
+
 /// <summary>
 /// 사용자 편집 가능한 텍스트 인스턴스(사각형). Step1(감지) 이후 좌표·내용을
 /// 추가/삭제/수정할 수 있고, Apply 시 TextRegion으로 변환되어 전달된다.
@@ -18,6 +21,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
     private string _text = "";
     private string _translatedText = "";
     private ReadingDir _readingDir = ReadingDir.HorizontalLeftToRight;
+    private SpeechTone _tone = SpeechTone.Auto;
     private bool _isSelected;
     private double _confidence = -1;
     private bool _include = true;
@@ -144,6 +148,34 @@ public sealed class TextInstanceViewModel : ReactiveObject
     public bool ColumnRightToLeft => _readingDir is ReadingDir.VerticalTopToBottomRightToLeft
         or ReadingDir.HorizontalRightToLeft;
 
+    /// <summary>말투(번역 어투 힌트, 사용자 2026-10-27): 여성형/남성형 강제 또는 자동 추정.</summary>
+    public SpeechTone Tone
+    {
+        get => _tone;
+        set { this.RaiseAndSetIfChanged(ref _tone, value); this.RaisePropertyChanged(nameof(ToneOption)); }
+    }
+
+    public ToneOption ToneOption
+    {
+        get => new(_tone, ToneLabel(_tone));
+        set { if (value != null) Tone = value.Tone; }
+    }
+
+    /// <summary>말투 3택 옵션(단일 진실원).</summary>
+    public static IReadOnlyList<ToneOption> ToneOptions { get; } = new[]
+    {
+        new ToneOption(SpeechTone.Auto, "말투 자동"),
+        new ToneOption(SpeechTone.Female, "여성형"),
+        new ToneOption(SpeechTone.Male, "남성형"),
+    };
+
+    private static string ToneLabel(SpeechTone t) => t switch
+    {
+        SpeechTone.Female => "여성형",
+        SpeechTone.Male => "남성형",
+        _ => "말투 자동",
+    };
+
     public double Width => Math.Max(0, Right - Left);
     public double Height => Math.Max(0, Bottom - Top);
 
@@ -171,6 +203,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
         Text = r.Text, ReadingDir = r.ReadingDir,
         TranslatedText = r.TranslatedText, Confidence = r.Confidence,
         SrcCharPx = r.Style.SrcCharPx, Bold = r.Style.Bold,
+        Tone = r.Tone,
     };
 
     public TextRegion ToRegion() => new()
@@ -178,6 +211,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
         Box = new BoundingBox((int)Left, (int)Top, (int)Right, (int)Bottom),
         Text = Text,
         ReadingDir = ReadingDir,
+        Tone = Tone,
         Style = new TextStyle
         {
             FontSizePx = (float)Math.Clamp(Max(SrcCharPx, Height * 0.7), 12.0, 200.0),

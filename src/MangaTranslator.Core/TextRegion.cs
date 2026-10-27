@@ -25,6 +25,10 @@ public sealed class TextRegion
         or ReadingDir.HorizontalRightToLeft;
     public double Confidence { get; set; } = 1.0;
 
+    /// <summary>화자 말투(사용자 2026-10-27): 번역 엔진에 넘기는 성별·성격 힌트.
+    /// Auto = 문맥에서 추정, Male/Female = 강제. 렌더는 무관, 번역 단계만 소비.</summary>
+    public SpeechTone Tone { get; set; } = SpeechTone.Auto;
+
     public TextStyle Style { get; set; } = new();
 
     /// <summary>inpaint용: 박스 확장(여백 포함). pad=8 — LaMa 클린 영역을 렌더 inflate와 동일하게.</summary>
@@ -52,6 +56,10 @@ public sealed class TextStyle
 }
 
 public enum BalloonKind { Unknown, SpeechBubble, NarrationBox, Shout, Sfx, PlainText }
+
+/// <summary>번역 말투 선택(사용자 2026-10-27): 여성형/남성형 어미·어투 선택.
+/// Auto면 번역 모델이 원문 대사(私/僕/あたし·어미 뉘앙스)로 화자를 추정한다.</summary>
+public enum SpeechTone { Auto, Male, Female }
 
 /// <summary>말풍선 읽기·재조판 방향(사용자 선택, 2026-10-26 ComboBox).
 /// 시작 모서리 + 축: 읽기 첫 문자 위치와 진행 축. 세로일 때 열 순서, 가로일 때 행 정렬 기준을 결정한다.</summary>

@@ -32,7 +32,8 @@ public static class NumberedBatchProtocol
         return map.All(s => !string.IsNullOrEmpty(s)) ? map.Select(s => s!).ToList() : null;
     }
 
-    /// <summary>모델이 붙이는 서두 장식 제거: '번역:'·따옴표·이중 번호·구두점 — 안정화까지 반복.</summary>
+    /// <summary>모델이 붙이는 서두 장식 제거: '번역:'·따옴표·이중 번호·구두점 — 안정화까지 반복.
+    /// 말투 마커 누수((여)/(남)/(자)) 안전망: 번역이 마커를 재출력하면 항상 제거한다.</summary>
     public static string Clean(string s)
     {
         s = s.Trim();
@@ -40,6 +41,7 @@ public static class NumberedBatchProtocol
         do
         {
             prev = s;
+            s = Regex.Replace(s, @"\s*[(（](여|남|자)[)）]\s*$", ""); // 말투 마커 echo 제거
             s = s.TrimStart('「', '『', '“', '"', '\'', '·', '-', '•');
             if (s.StartsWith("번역", StringComparison.Ordinal)) s = s[2..];
             s = s.TrimStart(':', '：', '.', ' ', '"', '\'', '”', '』', '」');
