@@ -25,6 +25,10 @@ public sealed class TextRegion
         or ReadingDir.HorizontalRightToLeft;
     public double Confidence { get; set; } = 1.0;
 
+    /// <summary>처리로 포함(☑)=제거+번역+재조판 대상. false면 원본 그대로 보존.
+    /// 통합 설정(BatchProject)에서 캐리어 — 파이프라인이 internally 필터(2026-10-28).</summary>
+    public bool Include { get; set; } = true;
+
     /// <summary>화자 말투(사용자 2026-10-27): 번역 엔진에 넘기는 성별·성격 힌트.
     /// Auto = 문맥에서 추정, Male/Female = 강제. 렌더는 무관, 번역 단계만 소비.</summary>
     public SpeechTone Tone { get; set; } = SpeechTone.Auto;

@@ -45,14 +45,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         set { if (value) SelectedMode = AppMode.Batch; }
     }
 
-    /// <summary>캔버스가 표시할 편집기: 모드=배치 && 펼친 항목이 있으면 배치编辑器, 아니면 싱글.
-    /// 배치 Expander를 펼치면 그 페이지가 캔버스에 뜨고(instances도 편집 가능), 사용자 2026-10-25.</summary>
+    /// <summary>캔버스가 표시할 편집기: 모드=배치 && (선택 항목 → 펼친 항목 → 싱글) 순.
+    /// 배치 Expander 펼침=캔버스(2026-10-25) + 큐 선택만으로도 즉시 전환(2026-10-28:
+    /// "인식된 이미지 세트 선택하면 이미지 보이는 게 바뀌어야 함").</summary>
     public PageEditorViewModel? ActiveEditor
     {
         get
         {
             if (SelectedMode == AppMode.Batch)
             {
+                if (Batch.SelectedEntry is { } s) return s.Editor;
                 var e = Batch.Queue.FirstOrDefault(q => q.IsExpanded)?.Editor;
                 if (e != null) return e;
             }

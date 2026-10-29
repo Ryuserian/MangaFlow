@@ -203,7 +203,18 @@ public sealed class TextInstanceViewModel : ReactiveObject
         Text = r.Text, ReadingDir = r.ReadingDir,
         TranslatedText = r.TranslatedText, Confidence = r.Confidence,
         SrcCharPx = r.Style.SrcCharPx, Bold = r.Style.Bold,
-        Tone = r.Tone,
+        Tone = r.Tone, Include = r.Include,
+        FontScale = r.Style.FontScale,   // 통합 설정 왕복 보존(2026-10-28)
+    };
+
+    /// <summary>통합 설정(BatchProject) 항목 → 편집 인스턴스(설정 기반 재조판 전 하이드레이트).</summary>
+    public static TextInstanceViewModel FromConfig(Core.Batch.RegionConfig rc) => new()
+    {
+        Left = rc.Left, Top = rc.Top, Right = rc.Right, Bottom = rc.Bottom,
+        Text = rc.Text, TranslatedText = rc.TranslatedText,
+        ReadingDir = (ReadingDir)rc.Dir, Tone = (SpeechTone)rc.Tone,
+        Include = rc.Include, Confidence = rc.Confidence,
+        SrcCharPx = rc.SrcCharPx, Bold = rc.Bold, FontScale = rc.FontScale,
     };
 
     public TextRegion ToRegion() => new()
@@ -212,6 +223,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
         Text = Text,
         ReadingDir = ReadingDir,
         Tone = Tone,
+        Include = Include,   // ☑=제거+번역 대상 / ☐=원본 보존(2026-10-28 통합 설정 캐리어)
         Style = new TextStyle
         {
             FontSizePx = (float)Math.Clamp(Max(SrcCharPx, Height * 0.7), 12.0, 200.0),

@@ -6,6 +6,7 @@ using MangaTranslator.Core;
 using MangaTranslator.Core.Imaging;
 using MangaTranslator.Core.Interfaces;
 using MangaTranslator.Core.Pipeline;
+using MangaTranslator.Core.Batch;
 using ReactiveUI;
 using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
 
@@ -246,15 +247,6 @@ public sealed class PageEditorViewModel : ViewModelBase
         return result;
     }
 
-    /// <summary>배치 루프가 부를 공개 Apply(편집된 인스턴스 반영). 외부 펌프 주입 가능.</summary>
-    public Task<PipelineResult> ApplyEditedAsync(Action<double, string?>? progress, CancellationToken ct)
-    {
-        var input = Instances.Where(i => i.Include).ToList();
-        if (_page == null) throw new InvalidOperationException("page not loaded");
-        if (input.Count == 0) throw new InvalidOperationException("☑된 말풍선 없음");
-        return ApplyCoreExternalAsync(input, progress, ct);
-    }
-
     private async Task<PipelineResult> ApplyCoreExternalAsync(List<TextInstanceViewModel> input, Action<double, string?>? progress, CancellationToken ct)
     {
         var pipeline = BuildPipeline();
@@ -335,11 +327,42 @@ public sealed class PageEditorViewModel : ViewModelBase
     /// <summary>折叠(접힘) 시 원본 풀 비트맵만 회수 — 편집/진행 데이터는 유지. 재접근 시 EnsurePageAsync가 재디코딩.</summary>
     public void ReleasePage() => _page = null;
 
-    /// <summary>배치 자동 실행이 부를 공개 엔트리포인트(page 로드 포함).</summary>
-    public async Task AutoRunAsync(Action<double, string?>? progress, CancellationToken ct)
+    // ---- 통합 설정(BatchProject) 브리지(2026-10-28 사용자 결정) ----
+    // 배치 ①인식 결과는 편집기 인스턴스를 거쳐 통합 설정에 모이고, ②실행은 설정만 읽어
+    // 호출자가 건네는 공유 파이프라인(모델 1회 적재·전 대기열 상주)으로 재조판한다.
+
+    /// <summary>현재 편집 인스턴스 → 통합 설정 스냅샷(☑/박스/방향/말투/크기 knob 포함).</summary>
+    public List<RegionConfig> SnapshotRegions() =>
+        Instances.Select(i => RegionConfig.FromRegion(i.ToRegion())).ToList();
+
+    /// <summary>공유 파이프라인으로 이 장만 detect(배치 ①단계 — 엔진은 호출자 소유).</summary>
+    public async Task<IReadOnlyList<TextRegion>> DetectWithPipelineAsync(TranslationPipeline pipe, CancellationToken ct = default)
     {
         await EnsurePageAsync(ct);
-        await RunAutoAsync(progress, ct);
+        if (_page == null) throw new InvalidOperationException("page not loaded");
+        return await Task.Run(() => pipe.DetectAsync(_page, ct).GetAwaiter().GetResult(), ct);
+    }
+
+    /// <summary>통합 설정 인스턴스 → 하이드레이트(캔버스 편집 가능 상태로). applied=true면 실행 후 표시.</summary>
+    public void HydrateInstances(IEnumerable<RegionConfig> cfgs, bool applied = false)
+    {
+        Instances.Clear();
+        SelectedInstance = null;
+        foreach (var c in cfgs) Instances.Add(Link(TextInstanceViewModel.FromConfig(c)));
+        _dirty = false;
+        Step = applied ? AppStep.Applied : AppStep.Detected;
+        this.RaisePropertyChanged(nameof(StageLabel));
+    }
+
+    /// <summary>설정 기반 재조판: 공유 파이프라인(호출자가 hold 설정)으로 fill+translate+render 1회.</summary>
+    public async Task<PipelineResult> ApplyWithPipelineAsync(TranslationPipeline pipe,
+        IReadOnlyList<TextRegion> regions, CancellationToken ct = default)
+    {
+        if (_page == null) throw new InvalidOperationException("page not loaded");
+        var result = await Task.Run(() =>
+            pipe.ApplyAsync(_page, regions, "ja", "ko", ct).GetAwaiter().GetResult(), ct);
+        Ingest(result);
+        return result;
     }
 
     public async Task LoadFromAsync(string path)
@@ -355,9 +378,6 @@ public sealed class PageEditorViewModel : ViewModelBase
         await EnsurePageAsync();
         _status($"열림: {System.IO.Path.GetFileName(path)}  {_page?.Width}×{_page?.Height}");
     }
-
-    /// <summary>이미지 열림/감지/완료 전환 → 메인 VM(마법사) 구독.</summary>
-    public void NotifyPageChanged() => PageStateChanged?.Invoke();
 
     private void Ingest(PipelineResult result)
     {

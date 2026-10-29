@@ -407,21 +407,43 @@
         <!-- ===== BATCH: Expander 대기열 — 펼쳐진 장이 캔버스(ActiveEditor)로 올라온다(2026-10-25) ===== -->
         <DockPanel IsVisible="{Binding IsBatch}">
           <StackPanel DockPanel.Dock="Top" Spacing="8">
-            <TextBlock Classes="step" Text="대기열 — 카드를 펼치면 캔버스에 뜹니다 (편집 후 ▶ 연속 실행)"/>
+            <TextBlock Classes="step" Text="대기열 — ①전체 인식 → 통합 설정(JSON) → ②설정 기반 번역·재조판"/>
             <StackPanel Orientation="Horizontal" Spacing="6">
               <!-- ＋ 파일 추가 제거(2026-10-25 사용자 피드백): 상단 '📂 열기'와 대화상자 중복 —
                    열기에서 여러 장 선택하면 나머지가 자동으로 여기 대기열에 들어온다 -->
               <Button Content="📂 폴더 추가" Command="{Binding Batch.AddFolderCommand}"/>
               <Button Content="－ 선택 제거" Command="{Binding Batch.RemoveSelectedCommand}"/>
             </StackPanel>
-            <Button Content="▶  연속 실행" Command="{Binding Batch.RunQueueCommand}"
-                  HorizontalAlignment="Stretch" Classes="accent" Padding="12,9"/>
+            <!-- ① 인식: OCR 모델만 적재 → 모든 장의 위치·원문 인식 → 통합 설정 파일로 커밋 -->
+            <Button Content="🔍 ① 전체 인식 (OCR→설정)" Command="{Binding Batch.ScanAllCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,9" IsEnabled="{Binding !AnyBusy}"/>
+            <!-- ② 실행: 번역 모델 1회 적재 → 통합 설정을 전체적으로 읽어 번역·재조판 -->
+            <Button Content="⚙ ② 번역·재조판 (설정 기반)" Command="{Binding Batch.TranslateFromConfigCommand}"
+                  HorizontalAlignment="Stretch" Classes="accent" Padding="12,9" IsEnabled="{Binding !AnyBusy}"/>
+            <!-- 폴백: 옛 연속 실행(펼친 장=편집 반영 / 미펼침 장=자동 전 단계) -->
+            <Button Content="▶ 연속 실행 (레거시)" Command="{Binding Batch.RunQueueCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,6" FontSize="11" Classes="flat"
+                  IsEnabled="{Binding !AnyBusy}"/>
           </StackPanel>
-          <ScrollViewer Margin="0,8,0,0">
-            <ItemsControl ItemsSource="{Binding Batch.Queue}">
-              <ItemsControl.ItemTemplate>
+          <!-- 우측 패딩 12px: 세로 스크롤바가 행 내용(진행률·상태)을 덮지 않게(2026-10-28 가림 신고) -->
+          <ScrollViewer Margin="0,8,12,0" Padding="0,0,4,0" HorizontalScrollBarVisibility="Disabled">
+            <!-- ListBox 전환(2026-10-28): 행 클릭=선택→캔버스가 즉시 그 장으로 전환(ActiveEditor 우선순위=선택>펼침).
+                 Expander 펼침/편집 UX는 그대로 유지. 행 내부에서는 스크롤을 만들어 nested scrollbar를 금지한다
+                 (겹스크롤Inside가 편집행을 가림 — 밖의 스크롤러만 사용). -->
+            <ListBox ItemsSource="{Binding Batch.Queue}" SelectedItem="{Binding Batch.SelectedEntry, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                  <Setter Property="Padding" Value="0"/>
+                  <Setter Property="CornerRadius" Value="8"/>
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+              </ListBox.Styles>
+              <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:BatchEntryViewModel">
-                  <!-- 펼침=캔버스ACTIVE+懒 디코딩/감지 / 접힘=비트맵 회수. 편집 상태는 유지. -->
+                  <!-- 펼침=인스턴스 편집 노출 / 접힘=비트맵 회수. 편집 상태는 유지. -->
                   <Expander Classes="page" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,6">
                     <Expander.Header>
                       <Grid ColumnDefinitions="*,70,52" Width="290">
@@ -439,9 +461,30 @@
                       <TextBlock FontSize="10" Foreground="#591D2129" TextTrimming="CharacterEllipsis"
                                  Text="{Binding Editor.ResultPath, StringFormat='→ {0}'}"
                                  IsVisible="{Binding Editor.ResultPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                      <!-- 편집 행: 툴바 공유 InstanceEditTemplate (☑/세로/🔄/✕ + 선택 시 슬라이더·원문) -->
-                      <ItemsControl ItemsSource="{Binding Editor.Instances}"
-                                    ItemTemplate="{StaticResource InstanceEditTemplate}"/>
+                      <!-- 사각형 편집 툴바(2026-10-28 사용자 요청: 배치에서도 OCR 박스 추가/삭제):
+                           ＋는 페이지 중앙 새 박스, 캔버스 클릭-드래그로 위치·크기 조정 가능 -->
+                      <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
+                        <Button Content="＋ 사각형 추가" Command="{Binding Editor.AddInstanceCommand}"
+                              Padding="8,4" FontSize="11"
+                              ToolTip.Tip="새 인식 사각형 추가 — 캔버스에서 드래그로 이동·코너로 크기 조정"/>
+                        <Button Content="🗑 선택 삭제" Command="{Binding Editor.DeleteSelectedCommand}"
+                              Padding="8,4" FontSize="11" Classes="flat"
+                              ToolTip.Tip="선택된 사각형 삭제 (캔버스 또는 아래 행 클릭으로 선택)"/>
+                      </StackPanel>
+                      <!-- 편집 행: 툴바 공유 InstanceEditTemplate (☑/세로/🔄/✕ + 선택 시 슬라이더·원문).
+                           ListBox 전환: 행 클릭=선택→캔버스 하이라이트·인라인 편집 열림(싱글과 동일 UX) -->
+                      <ListBox ItemsSource="{Binding Editor.Instances}"
+                               SelectedItem="{Binding Editor.SelectedInstance, Mode=TwoWay}"
+                               Background="Transparent" BorderThickness="0" Padding="0"
+                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                               ItemTemplate="{StaticResource InstanceEditTemplate}">
+                        <ListBox.Styles>
+                          <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0,2"/>
+                          </Style>
+                        </ListBox.Styles>
+                      </ListBox>
                       <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
                         <Button Content="이 장만 번역 실행" Command="{Binding Editor.ApplyCommand}"
                               Classes="accent" Padding="10,5" FontSize="11"/>
@@ -453,8 +496,8 @@
                     </StackPanel>
                   </Expander>
                 </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+              </ListBox.ItemTemplate>
+            </ListBox>
           </ScrollViewer>
         </DockPanel>
 

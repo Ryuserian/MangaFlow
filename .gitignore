@@ -6,6 +6,12 @@
 # dotenv files
 .env
 
+# 스크린샷 작업 산출물 (GUI 테스트 캡처 — 저장소 제외)
+.shots/
+out/
+*.project.json
+batch-project.json
+
 # User-specific files
 *.rsuser
 *.suo
