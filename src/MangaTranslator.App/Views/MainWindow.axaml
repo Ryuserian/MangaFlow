@@ -90,12 +90,22 @@
       <StackPanel Spacing="2">
         <!-- 읽기 방향 ComboBox(사용자 2026-10-26): 가로/세로 × 시작(왼쪽/오른쪽) 4택.
              아이콘: 활살(arrowhead) 위치 = 첫 행/열의 시작 변. 한국어 번역 기본=가로 왼쪽부터. -->
-        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
           <CheckBox IsChecked="{Binding Include, Mode=TwoWay}"
                   ToolTip.Tip="번역 대상 — 체크된 말풍선만 일본어 제거 + 번역 + 재조판. 해제 시 원본 보존"/>
           <TextBlock Grid.Column="1" Text="번역" FontSize="10" Foreground="#8C1D2129"
                    VerticalAlignment="Center" Margin="2,0,8,0"/>
-          <ComboBox Grid.Column="2" ItemsSource="{x:Static vm:TextInstanceViewModel.ReadingDirs}"
+          <TextBlock Grid.Column="2" Text="{Binding Text}" Margin="0,0,4,0"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Foreground="{Binding Confidence, Converter={x:Static conv:ConfidenceLowToBrushConverter.Instance}}"
+                   FontSize="12"
+                   Opacity="{Binding Include, Converter={x:Static conv:IncludeToOpacityConverter.Instance}}"/>
+          <Button Grid.Column="3" Content="🔄" Classes="flat" Command="{Binding ReocrCommand}"
+                  ToolTip.Tip="이 사각형만 OCR 재인식" Padding="6,2"/>
+          <Button Grid.Column="4" Content="✕" Classes="flat" Command="{Binding RemoveCommand}" Padding="6,2"/>
+        </Grid>
+        <Grid ColumnDefinitions="Auto,Auto" Margin="26,0,0,2">
+          <ComboBox ItemsSource="{x:Static vm:TextInstanceViewModel.ReadingDirs}"
                    SelectedItem="{Binding ReadingDirOption, Mode=TwoWay}"
                    FontSize="11" Padding="4,1" Width="132" Height="24" MinHeight="24"
                    ToolTip.Tip="읽기 방향 — 재조판이 시작되는 모서리와 진행 순서 (세로 오른쪽=일본 만화 관행, 가로 왼쪽=한국어 기본)">
@@ -111,26 +121,17 @@
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <!-- 말투 ComboBox(사용자 2026-10-27): 번역 어투 성별 힌트 — 자동/여성형/남성형 -->
-          <ComboBox Grid.Column="3" ItemsSource="{x:Static vm:TextInstanceViewModel.ToneOptions}"
+          <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:TextInstanceViewModel.ToneOptions}"
                    SelectedItem="{Binding ToneOption, Mode=TwoWay}"
                    FontSize="11" Padding="4,1" Width="92" Height="24" MinHeight="24" Margin="4,0,0,0"
                    ToolTip.Tip="말투 — 여성형/남성형 어투로 번역. 자동이면 원문(私/僕 등)으로 추정"/>
-          <TextBlock Grid.Column="4" Text="{Binding Text}" Margin="6,0,4,0"
-                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                   Foreground="{Binding Confidence, Converter={x:Static conv:ConfidenceLowToBrushConverter.Instance}}"
-                   FontSize="12"
-                   Opacity="{Binding Include, Converter={x:Static conv:IncludeToOpacityConverter.Instance}}"/>
-          <Button Grid.Column="5" Content="🔄" Classes="flat" Command="{Binding ReocrCommand}"
-                  ToolTip.Tip="이 사각형만 OCR 재인식" Padding="6,2"/>
-          <Button Grid.Column="6" Content="✕" Classes="flat" Command="{Binding RemoveCommand}" Padding="6,2"/>
         </Grid>
         <!-- 저신뢰 경고: 빨간 라벨 -->
         <TextBlock Text="⚠ 인식 신뢰도 낮음 — 원문을 확인하세요" FontSize="9" Foreground="#FFD92D20"
-                   Margin="176,0,0,0"
+                   Margin="26,0,0,0"
                    IsVisible="{Binding Confidence, Converter={x:Static conv:ConfidenceLowConverter.Instance}}"/>
         <!-- 선택된 항목만 원문 편집 + 크기 노브 인라인 -->
-        <StackPanel IsVisible="{Binding IsSelected}" Margin="176,2,0,6" Spacing="4">
+        <StackPanel IsVisible="{Binding IsSelected}" Margin="26,2,0,6" Spacing="4">
           <Grid ColumnDefinitions="Auto,*,Auto">
             <TextBlock Text="글자 크기" FontSize="10" Foreground="#991D2129" VerticalAlignment="Center"/>
             <Slider Grid.Column="1" Minimum="0.5" Maximum="3"
@@ -176,7 +177,7 @@
         </Border>
 
         <!-- 공용 열기(2026-10-25 통합): 배치 '＋ 파일 추가'와 대화상자 중복 제거.
-             여러 장 선택 시 1장=싱글 편집·나머지=배치 대기열(OpenImageCommand 내부 규칙). -->
+             여러 장 선택 시 첫 장=싱글 캔버스+전체=배치 대기열(OpenImageCommand 내부 규칙). -->
         <Button Grid.Column="3" Content="📂  열기" Command="{Binding OpenImageCommand}"
                 Classes="accent" Padding="14,7" VerticalAlignment="Center"/>
       </Grid>
@@ -307,7 +308,7 @@
             <TextBlock Text="이미지를 열어주세요" FontSize="16" Foreground="#FF1D2129" HorizontalAlignment="Center"/>
             <TextBlock Text="JPG · PNG · WEBP — 말풍선을 자동 인식합니다" FontSize="12"
                      Foreground="#8C1D2129" HorizontalAlignment="Center" TextAlignment="Center"/>
-            <TextBlock Text="↑ 상단 바의 📂 열기 — 여러 장 선택하면 나머지는 배치 대기열로" FontSize="11"
+            <TextBlock Text="↑ 상단 바의 📂 열기 — 여러 장 선택하면 모두 배치 대기열에 큐잉" FontSize="11"
                      Foreground="#591D2129" HorizontalAlignment="Center" TextAlignment="Center"/>
           </StackPanel>
 
@@ -340,8 +341,6 @@
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
               <Button Content="＋ 추가" Command="{Binding Single.AddInstanceCommand}"/>
               <Button Content="🗑 삭제" Command="{Binding Single.DeleteSelectedCommand}"/>
-              <Button Content="전체 ☑" Command="{Binding Single.SelectAllCommand}"/>
-              <Button Content="전체 ☐" Command="{Binding Single.DeselectAllCommand}"/>
             </StackPanel>
             <Border DockPanel.Dock="Bottom" Background="#FFF2F3F7" CornerRadius="8" Padding="8,6" Margin="0,6,0,0">
               <Grid ColumnDefinitions="Auto,*,Auto,*,Auto,*,Auto,*">
@@ -446,7 +445,7 @@
                   <!-- 펼침=인스턴스 편집 노출 / 접힘=비트맵 회수. 편집 상태는 유지. -->
                   <Expander Classes="page" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,6">
                     <Expander.Header>
-                      <Grid ColumnDefinitions="*,70,52" Width="290">
+                      <Grid ColumnDefinitions="*,70,52">
                         <TextBlock Classes="fname" Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
                         <ProgressBar Grid.Column="1" Value="{Binding Progress}" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="2" Text="{Binding Status}" FontSize="11" VerticalAlignment="Center"
@@ -488,10 +487,6 @@
                       <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
                         <Button Content="이 장만 번역 실행" Command="{Binding Editor.ApplyCommand}"
                               Classes="accent" Padding="10,5" FontSize="11"/>
-                        <Button Content="☑ 전체" Command="{Binding Editor.SelectAllCommand}"
-                              Padding="8,4" FontSize="11" Classes="flat"/>
-                        <Button Content="☐ 전체" Command="{Binding Editor.DeselectAllCommand}"
-                              Padding="8,4" FontSize="11" Classes="flat"/>
                       </StackPanel>
                     </StackPanel>
                   </Expander>

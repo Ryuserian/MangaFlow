@@ -1,15 +1,42 @@
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using MangaTranslator.App.ViewModels;
+using ReactiveUI;
+using ReactiveUI.Avalonia;
+using ReactiveUI.Primitives.Disposables;
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.Views;
 
-public partial class MainWindow : Window
+public partial class MainWindow : ReactiveWindow<MainWindowViewModel>
 {
     public MainWindow()
     {
         InitializeComponent();
-        DataContextChanged += (_, _) => WirePickers();
+        this.WhenActivated((MultipleDisposable d) => InitializeEvents(d));
+    }
+
+    /// <summary>뷰 수명 바인딩 — picker 연결 + 캔버스 선택→목록 스크롤.</summary>
+    private void InitializeEvents(MultipleDisposable d)
+    {
+        // 활성화(attach) 시점에는 DataContext가 이미 세팅된 후 — 최초 연결은 직접 호출必须.
+        // (event만 구독하면 생성자 후 객체초 initializer의 DataContextChanged를 놓쳐 picker가 null)
+        WirePickers();
+
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => DataContextChanged += h,
+                h => DataContextChanged -= h)
+            .Subscribe(_ => WirePickers())
+            .DisposeWith(d);
+
+        // 캔버스 클릭 선택 → 목록으로 스크롤
+        var list = this.FindControl<ListBox>("InstanceList");
+        if (list != null)
+            Observable.FromEventPattern<Avalonia.Controls.SelectionChangedEventArgs>(
+                    h => list.SelectionChanged += h,
+                    h => list.SelectionChanged -= h)
+                .Subscribe(_ => list.ScrollIntoView(list.SelectedItem))
+                .DisposeWith(d);
     }
 
     private void WirePickers()
@@ -42,11 +69,6 @@ public partial class MainWindow : Window
             });
             return folders.Count > 0 ? folders[0].Path.LocalPath : null;
         };
-
-        // 캔버스 클릭 선택 → 목록으로 스크롤
-        var list = this.FindControl<ListBox>("InstanceList");
-        if (list != null)
-            list.SelectionChanged += (_, _) => list.ScrollIntoView(list.SelectedItem);
     }
 
     // ---- 오버레이 사각형: 클릭=선택, 드래그=이동 (rect가 pointer capture) ----

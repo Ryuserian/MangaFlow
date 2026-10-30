@@ -5,11 +5,16 @@ using Avalonia.Markup.Xaml;
 using MangaTranslator.App.Services;
 using MangaTranslator.App.ViewModels;
 using MangaTranslator.App.Views;
+using ReactiveUI;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App;
 
 public partial class App : Application
 {
+    private readonly CompositeDisposable _appLifetime = new();
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -26,15 +31,37 @@ public partial class App : Application
             desktop.MainWindow = splash;
 
             var svm = (SplashViewModel)splash.DataContext!;
-            svm.Ready += () =>
+            InitializeEvents(desktop, svm, splash, main, mainVm);
+        }
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private void InitializeEvents(IClassicDesktopStyleApplicationLifetime desktop,
+        SplashViewModel svm, Window splash, MainWindow main, MainWindowViewModel mainVm)
+    {
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => svm.Ready += h,
+                h => svm.Ready -= h)
+            .Subscribe(_ =>
             {
                 desktop.MainWindow = main;
                 main.Show();      // 먼저 보여야 OnLastWindowClose 중개 공백이 없다
                 splash.Close();
-            };
-            // ✕ = 앱 종료 — 메인을 열지 않고 즉시 종료(미다운 모델은 .part 이어받기 유지)
-            svm.CloseRequested += () => desktop.Shutdown();
-        }
-        base.OnFrameworkInitializationCompleted();
+                svm.Dispose();
+            })
+            .DisposeWith(_appLifetime);
+
+        // ✕ = 앱 종료 — 메인을 열지 않고 즉시 종료(미다운 모델은 .part 이어받기 유지)
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => svm.CloseRequested += h,
+                h => svm.CloseRequested -= h)
+            .Subscribe(_ => desktop.Shutdown())
+            .DisposeWith(_appLifetime);
+
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => main.Closed += h,
+                h => main.Closed -= h)
+            .Subscribe(_ => mainVm.Dispose())
+            .DisposeWith(_appLifetime);
     }
 }

@@ -6,7 +6,10 @@ using MangaTranslator.Core.Imaging;
 using MangaTranslator.Core.Interfaces;
 using MangaTranslator.Core.Pipeline;
 using ReactiveUI;
-using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
+using ReactiveUI.Primitives.Disposables;
+using System.ComponentModel;
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.ViewModels;
 
@@ -17,11 +20,13 @@ namespace MangaTranslator.App.ViewModels;
 /// 2026-10-28 리팩터: 편집 데이터(single truth)는 BatchProject(통합 설정 JSON)로 이동 —
 /// 편집기는 설정의 뷰/편집 프록시. 접혀도 설정은 JSON에 살아있어 캔버스 없이도 전체 재조판 가능.
 /// </summary>
-public sealed class BatchEntryViewModel : ReactiveObject
+public sealed class BatchEntryViewModel : ReactiveObject, IDisposable
 {
     private string _status = "대기";
     private double _progress;
     private bool _isExpanded;
+
+    public CompositeDisposable Lifetime { get; } = new();
 
     public string Path { get; init; } = "";
     public string FileName => System.IO.Path.GetFileName(Path);
@@ -43,7 +48,13 @@ public sealed class BatchEntryViewModel : ReactiveObject
         }
     }
 
-    public event Action<BatchEntryViewModel, bool>? ExpandChanged;
+    public event EventHandler<bool>? ExpandChanged;
+
+    public void Dispose()
+    {
+        Lifetime.Dispose();
+        Editor.Dispose();
+    }
 }
 
 /// <summary>
@@ -84,14 +95,37 @@ public sealed class BatchModeViewModel : ViewModelBase
 
     public ObservableCollection<BatchEntryViewModel> Queue { get; } = new();
 
-    public bool IsRunning { get => _running; private set => this.RaiseAndSetIfChanged(ref _running, value); }
+    private PageEditorViewModel? ExpandedEditor => Queue.FirstOrDefault(q => q.IsExpanded)?.Editor;
+
+    protected override void DisposeCore()
+    {
+        _busyTimer?.Stop();
+        if (_busyTick != null && _busyTimer != null) _busyTimer.Tick -= _busyTick;
+        CancelActive();
+        foreach (IDisposable c in new IDisposable[]
+                 { AddFilesCommand, AddFolderCommand, RemoveSelectedCommand, ScanAllCommand, TranslateFromConfigCommand, RunQueueCommand, CancelRunCommand })
+            c.Dispose();
+        foreach (var q in Queue) q.Dispose();
+        Queue.Clear();
+        _selected = null;
+    }
+
+    public bool IsRunning { get => _running || ExpandedEditor?.IsBusy == true; private set => this.RaiseAndSetIfChanged(ref _running, value); }
 
     /// <summary>현재 실행 중 진행률(전체 대기열 기준 0~1)과 단계 메시지. View 오버레이가 소비.</summary>
-    public double BusyProgress { get => _busyProgress; private set => this.RaiseAndSetIfChanged(ref _busyProgress, value); }
-    public string BusyMessage { get => _busyMessage; private set => this.RaiseAndSetIfChanged(ref _busyMessage, value); }
+    public double BusyProgress
+    {
+        get => ExpandedEditor is { IsBusy: true } e ? e.OverlayProgress : _busyProgress;
+        private set => this.RaiseAndSetIfChanged(ref _busyProgress, value);
+    }
+    public string BusyMessage
+    {
+        get => ExpandedEditor is { IsBusy: true } e ? e.OverlayMessage : _busyMessage;
+        private set => this.RaiseAndSetIfChanged(ref _busyMessage, value);
+    }
 
     /// <summary>펼친 항목 변경/추가 제거 → 메인뷰 캔버스 ActiveEditor 재계산 훅.</summary>
-    public event Action? ActiveEditorChanged;
+    public event EventHandler? ActiveEditorChanged;
 
     private void BeginBusy(string msg)
     {
@@ -133,7 +167,7 @@ public sealed class BatchModeViewModel : ViewModelBase
             this.RaiseAndSetIfChanged(ref _selected, value);
             if (value != null)
             {
-                ActiveEditorChanged?.Invoke();            // 캔버스 즉시 재라우팅(로딩 전 자리 확보)
+                ActiveEditorChanged?.Invoke(this, EventArgs.Empty);            // 캔버스 즉시 재라우팅(로딩 전 자리 확보)
                 _ = RestoreEditorFromConfigAsync(value, allowDetect: false); // 디코딩+설정 하이드레이트만
             }
         }
@@ -142,16 +176,16 @@ public sealed class BatchModeViewModel : ViewModelBase
     public Func<Task<string[]>>? PickFilesAsync { get; set; }
     public Func<Task<string?>>? PickFolderAsync { get; set; }
 
-    public ReactiveCommand<RxVoid, RxVoid> AddFilesCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> AddFolderCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> RemoveSelectedCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> AddFilesCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> AddFolderCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> RemoveSelectedCommand { get; private set; } = null!;
     /// <summary>① 전체 인식 — OCR(det)만 올리고 파일마다 위치+원문 인식 → BatchProject 채움(JSON 커밋).</summary>
-    public ReactiveCommand<RxVoid, RxVoid> ScanAllCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> ScanAllCommand { get; private set; } = null!;
     /// <summary>② 설정 기반 번역·재조판 — 번역 GGUF 1회 적재(hold), BatchProject 전체를 읽어 순차 실행.</summary>
-    public ReactiveCommand<RxVoid, RxVoid> TranslateFromConfigCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> TranslateFromConfigCommand { get; private set; } = null!;
     /// <summary>폴백: 옛 연속 실행(펼침=편집 반영 Apply / 미펼침=자동 Run).</summary>
-    public ReactiveCommand<RxVoid, RxVoid> RunQueueCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> CancelRunCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> RunQueueCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> CancelRunCommand { get; private set; } = null!;
 
     /// <summary>메인 VM 취소 버튼 집계용 — 진행 중 CTS를 직접 취소.</summary>
     public void CancelActive()
@@ -167,19 +201,31 @@ public sealed class BatchModeViewModel : ViewModelBase
         var ed = new PageEditorViewModel(_ctx, _keys, _status);
         ed.AttachPath(path);
         var entry = new BatchEntryViewModel { Path = path, Editor = ed };
-        entry.ExpandChanged += (entry2, open) =>
-        {
-            if (open) { _ = RestoreEditorFromConfigAsync(entry2, allowDetect: true); } // 펼침: 설정→하이드레이트, 없으면 detect
-            else if (!entry2.IsExpanded) ed.ReleasePage();          // 접힘: 비트맵 회수(설정=진실원 유지)
-            ActiveEditorChanged?.Invoke();
-        };
-        ed.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName is nameof(PageEditorViewModel.IsBusy)
-                or nameof(PageEditorViewModel.OverlayMessage))
-                this.RaisePropertyChanged(nameof(IsRunning)); // AnyBusy 게이트(전역 오버레이) 최신화
-        };
+        InitializeEvents(entry, ed); // 항목 단위 구독 → entry.Lifetime 수명
         return entry;
+    }
+
+    private void InitializeEvents(BatchEntryViewModel entry, PageEditorViewModel ed)
+    {
+        Observable.FromEventPattern<bool>(
+                h => entry.ExpandChanged += h,
+                h => entry.ExpandChanged -= h)
+            .Subscribe(ev =>
+            {
+                var e2 = (BatchEntryViewModel)ev.Sender!;
+                if (ev.EventArgs) { _ = RestoreEditorFromConfigAsync(e2, allowDetect: true); }
+                else if (!e2.IsExpanded) ed.ReleasePage();
+                ActiveEditorChanged?.Invoke(this, EventArgs.Empty);
+            })
+            .DisposeWith(entry.Lifetime);
+
+        Observable.FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                h => ed.PropertyChanged += h,
+                h => ed.PropertyChanged -= h)
+            .Where(ev => ev.EventArgs.PropertyName is nameof(PageEditorViewModel.IsBusy)
+                                         or nameof(PageEditorViewModel.OverlayMessage))
+            .Subscribe(_ => this.RaisePropertyChanged(nameof(IsRunning)))
+            .DisposeWith(entry.Lifetime);
     }
 
     /// <summary>통합 설정 JSON 경로 = 대기열 첫 항목 폴더 + (queue가 비면 out).
@@ -232,7 +278,7 @@ public sealed class BatchModeViewModel : ViewModelBase
             if (!Queue.Any(q => q.Path == p))
                 Queue.Add(MakeEntry(p));
         EnsureProjectPath();
-        ActiveEditorChanged?.Invoke();
+        ActiveEditorChanged?.Invoke(this, EventArgs.Empty);
         _status($"대기열 {Queue.Count}장");
     }
 
@@ -271,32 +317,45 @@ public sealed class BatchModeViewModel : ViewModelBase
     {
         _ctx = ctx; _keys = keys; _status = status;
 
+        this.WhenActivated((MultipleDisposable d) =>
+        {
+            InitializeCommands(d);
+            InitializeProperties(d);
+        });
+        ActivateLifetime();
+    }
+
+    private void InitializeCommands(MultipleDisposable d)
+    {
         AddFilesCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (PickFilesAsync == null) return;
             var paths = await PickFilesAsync();
             AddPaths(paths ?? Array.Empty<string>());
-        });
+        }).DisposeWith(d);
 
         AddFolderCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (PickFolderAsync == null) return;
             var folder = await PickFolderAsync();
             if (folder != null) AddFolder(folder);
-        });
+        }).DisposeWith(d);
 
         RemoveSelectedCommand = ReactiveCommand.Create(() =>
         {
-            if (SelectedEntry != null) Queue.Remove(SelectedEntry);
+            if (SelectedEntry != null)
+            {
+                SelectedEntry.Editor.Dispose();
+                Queue.Remove(SelectedEntry);
+            }
             SyncProjectWithQueue();
-            ActiveEditorChanged?.Invoke();
-        }, this.WhenAnyValue(x => x.SelectedEntry, (BatchEntryViewModel? s) => s != null));
+            ActiveEditorChanged?.Invoke(this, EventArgs.Empty);
+        }, WhenProp(nameof(SelectedEntry), () => SelectedEntry != null)).DisposeWith(d);
 
-        // ①/② 2단계 커맨드 — 통합 설정 파일 중심 워크플로(2026-10-28 사용자 결정).
         ScanAllCommand = ReactiveCommand.CreateFromTask(async ct => await ScanAllAsync(ct),
-            this.WhenAnyValue(x => x.IsRunning, (bool r) => !r));
+            WhenProp(nameof(IsRunning), () => !IsRunning)).DisposeWith(d);
         TranslateFromConfigCommand = ReactiveCommand.CreateFromTask(async ct => await TranslateFromConfigAsync(ct),
-            this.WhenAnyValue(x => x.IsRunning, (bool r) => !r));
+            WhenProp(nameof(IsRunning), () => !IsRunning)).DisposeWith(d);
 
         // 펼침/접힘에도 라우팅이 변함 — 첫 자동 펼침으로 캔버스 예열(빈 화면 방지).
         RunQueueCommand = ReactiveCommand.CreateFromTask(async ct =>
@@ -347,13 +406,24 @@ public sealed class BatchModeViewModel : ViewModelBase
                 SyncProjectWithQueue();
                 _status($"배치 종료 — {Queue.Count(e => e.Status == "완료")}/{Queue.Count} 완료");
             }
-        }, this.WhenAnyValue(x => x.IsRunning, (bool r) => !r));
+        }, WhenProp(nameof(IsRunning), () => !IsRunning)).DisposeWith(d);
 
         CancelRunCommand = ReactiveCommand.Create(() =>
         {
             _activeCts?.Cancel();
             BusyMessage = "취소 중…";
-        }, this.WhenAnyValue(x => x.IsRunning));
+        }, WhenProp(nameof(IsRunning), () => IsRunning)).DisposeWith(d);
+    }
+
+    private void InitializeProperties(MultipleDisposable d)
+    {
+        WhenProp(nameof(IsRunning), () => IsRunning)
+            .Subscribe(_ =>
+            {
+                this.RaisePropertyChanged(nameof(BusyProgress));
+                this.RaisePropertyChanged(nameof(BusyMessage));
+            })
+            .DisposeWith(d);
     }
 
     // ================================================================

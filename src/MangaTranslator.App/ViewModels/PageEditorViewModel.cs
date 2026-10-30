@@ -8,7 +8,9 @@ using MangaTranslator.Core.Interfaces;
 using MangaTranslator.Core.Pipeline;
 using MangaTranslator.Core.Batch;
 using ReactiveUI;
-using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
+using ReactiveUI.Primitives.Disposables;
+using System.ComponentModel;
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.ViewModels;
 
@@ -41,8 +43,7 @@ public sealed class PageEditorViewModel : ViewModelBase
     private double _overlayProgress;
     private string _overlayMessage = "";
     private double _busyCeiling = 0.9;
-    private EventHandler? _busyTick;
-    private DispatcherTimer? _busyTimer;
+    private readonly DispatcherTimer _busyTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private CancellationTokenSource? _activeCts;
 
     public bool IsBusy { get => _isBusy; private set => this.RaiseAndSetIfChanged(ref _isBusy, value); }
@@ -63,7 +64,7 @@ public sealed class PageEditorViewModel : ViewModelBase
         private set
         {
             this.RaiseAndSetIfChanged(ref _step, value);
-            CanApplyChanged?.Invoke();
+            CanApplyChanged?.Invoke(this, EventArgs.Empty);
             this.RaisePropertyChanged(nameof(StageLabel));
         }
     }
@@ -79,9 +80,9 @@ public sealed class PageEditorViewModel : ViewModelBase
         _ => "완료",
     };
 
-    public event Action? CanApplyChanged;
+    public event EventHandler? CanApplyChanged;
     /// <summary>감지/로드/해제 등 페이지 상태 변화 → 마법사 페이지 자동 전환(싱글 전용).</summary>
-    public event Action? PageStateChanged;
+    public event EventHandler? PageStateChanged;
 
     public TextInstanceViewModel? SelectedInstance
     {
@@ -100,20 +101,31 @@ public sealed class PageEditorViewModel : ViewModelBase
         ? $"({(int)s.Left},{(int)s.Top})–({(int)s.Right},{(int)s.Bottom})  {s.ReadingDirOption.Label}"
         : "";
 
-    public ReactiveCommand<RxVoid, RxVoid> DetectCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> ApplyCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> RunAllCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> AddInstanceCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> DeleteSelectedCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> SelectAllCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> DeselectAllCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> CancelCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> DetectCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> ApplyCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> RunAllCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> AddInstanceCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> DeleteSelectedCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> SelectAllCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> DeselectAllCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> CancelCommand { get; private set; } = null!;
 
     public PageEditorViewModel(EngineContext ctx,
         Func<(string, string, string, string)> keys, Action<string> status)
     {
         _ctx = ctx; _keys = keys; _status = status;
 
+        this.WhenActivated((MultipleDisposable d) =>
+        {
+            InitializeCommands(d);
+            InitializeEvents(d);
+            InitializeProperties(d);
+        });
+        ActivateLifetime();
+    }
+
+    private void InitializeCommands(MultipleDisposable d)
+    {
         AddInstanceCommand = ReactiveCommand.Create(() =>
         {
             if (_page == null) return;
@@ -122,7 +134,7 @@ public sealed class PageEditorViewModel : ViewModelBase
             Instances.Add(vm);
             SelectedInstance = vm;
             _dirty = true;
-            CanApplyChanged?.Invoke();
+            CanApplyChanged?.Invoke(this, EventArgs.Empty);
             this.RaisePropertyChanged(nameof(StageLabel));
             _status($"인스턴스 {Instances.Count}개");
         });
@@ -132,17 +144,18 @@ public sealed class PageEditorViewModel : ViewModelBase
             if (SelectedInstance is { } s)
             {
                 Instances.Remove(s);
+                s.Dispose();
                 _dirty = true;
-                CanApplyChanged?.Invoke();
+                CanApplyChanged?.Invoke(this, EventArgs.Empty);
                 _status($"인스턴스 {Instances.Count}개");
             }
-        }, this.WhenAnyValue(x => x.SelectedInstance, (TextInstanceViewModel? s) => s != null));
+        }, WhenProp(nameof(SelectedInstance), () => SelectedInstance != null)).DisposeWith(d);
 
         SelectAllCommand = ReactiveCommand.Create(() =>
         {
             foreach (var i in Instances) i.Include = true;
             _dirty = true;
-            CanApplyChanged?.Invoke();
+            CanApplyChanged?.Invoke(this, EventArgs.Empty);
             _status($"전체 선택 — {Instances.Count}개 처리 예정");
         });
 
@@ -150,7 +163,7 @@ public sealed class PageEditorViewModel : ViewModelBase
         {
             foreach (var i in Instances) i.Include = false;
             _dirty = true;
-            CanApplyChanged?.Invoke();
+            CanApplyChanged?.Invoke(this, EventArgs.Empty);
             _status("전체 해제 — [번역 실행] 대상이 없습니다");
         });
 
@@ -173,7 +186,7 @@ public sealed class PageEditorViewModel : ViewModelBase
                 foreach (var r in regions) Instances.Add(Link(TextInstanceViewModel.FromRegion(r)));
                 _dirty = true;
                 Step = AppStep.Detected;
-                PageStateChanged?.Invoke();
+                PageStateChanged?.Invoke(this, EventArgs.Empty);
                 _status($"검출 완료: {regions.Count}개 — ☑한 말풍선만 제거·번역됩니다");
             }
             catch (OperationCanceledException) { _status("감지 취소됨"); }
@@ -216,7 +229,7 @@ public sealed class PageEditorViewModel : ViewModelBase
                 foreach (var r in result.Regions) Instances.Add(Link(TextInstanceViewModel.FromRegion(r)));
                 _dirty = true;
                 Ingest(result);
-                PageStateChanged?.Invoke();
+                PageStateChanged?.Invoke(this, EventArgs.Empty);
                 _status($"전체 완료 — 출력: {ResultPath}");
             }
             catch (OperationCanceledException) { _status("전체 실행 취소됨"); }
@@ -224,7 +237,28 @@ public sealed class PageEditorViewModel : ViewModelBase
             finally { _activeCts = null; EndBusy(); }
         });
 
-        CancelCommand = ReactiveCommand.Create(CancelActive, this.WhenAnyValue(x => x.IsBusy));
+        CancelCommand = ReactiveCommand.Create(CancelActive, WhenProp(nameof(IsBusy), () => IsBusy)).DisposeWith(d);
+    }
+
+    private void InitializeEvents(MultipleDisposable d)
+    {
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => _busyTimer.Tick += h,
+                h => _busyTimer.Tick -= h)
+            .Subscribe(_ =>
+            {
+                OverlayProgress = Math.Min(_busyCeiling,
+                    OverlayProgress + Math.Max(0.004, (_busyCeiling - OverlayProgress) * 0.05));
+                this.RaisePropertyChanged(nameof(OverlayPercentText));
+            })
+            .DisposeWith(d);
+    }
+
+    private void InitializeProperties(MultipleDisposable d)
+    {
+        this.WhenAnyValue(x => x.IsBusy)
+            .Subscribe(_ => this.RaisePropertyChanged(nameof(OverlayPercentText)))
+            .DisposeWith(d);
     }
 
     /// <summary>메인 VM 취소 집계용 — 진행 중 CTS 직접 취소.</summary>
@@ -245,6 +279,15 @@ public sealed class PageEditorViewModel : ViewModelBase
             input[i].TranslatedText = result.Regions[i].TranslatedText;
         Ingest(result);
         return result;
+    }
+
+    /// <summary>배치 루프가 부를 공개 Apply(편집된 인스턴스 반영). 외부 펌프 주입 가능.</summary>
+    public Task<PipelineResult> ApplyEditedAsync(Action<double, string?>? progress, CancellationToken ct)
+    {
+        var input = Instances.Where(i => i.Include).ToList();
+        if (_page == null) throw new InvalidOperationException("page not loaded");
+        if (input.Count == 0) throw new InvalidOperationException("☑된 말풍선 없음");
+        return ApplyCoreExternalAsync(input, progress, ct);
     }
 
     private async Task<PipelineResult> ApplyCoreExternalAsync(List<TextInstanceViewModel> input, Action<double, string?>? progress, CancellationToken ct)
@@ -301,7 +344,7 @@ public sealed class PageEditorViewModel : ViewModelBase
             foreach (var r in regions) Instances.Add(Link(TextInstanceViewModel.FromRegion(r)));
             _dirty = true; // 편집된 간주 — 이후 실행은 사용자 편집(☑/박스)을 존중해 Apply 경로
             Step = AppStep.Detected;
-            PageStateChanged?.Invoke();
+            PageStateChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _status($"감지 오류: {ex.Message}"); }
@@ -326,6 +369,27 @@ public sealed class PageEditorViewModel : ViewModelBase
 
     /// <summary>折叠(접힘) 시 원본 풀 비트맵만 회수 — 편집/진행 데이터는 유지. 재접근 시 EnsurePageAsync가 재디코딩.</summary>
     public void ReleasePage() => _page = null;
+
+    protected override void DisposeCore()
+    {
+        _busyTimer.Stop();
+        CancelActive();
+        foreach (IDisposable? c in new IDisposable?[]
+                 { DetectCommand, ApplyCommand, RunAllCommand, AddInstanceCommand, DeleteSelectedCommand, SelectAllCommand, DeselectAllCommand, CancelCommand })
+            c?.Dispose();
+        foreach (var i in Instances) i.Dispose();
+        Instances.Clear();
+        SelectedInstance = null;
+        ReleasePage();
+        Display = null;
+    }
+
+    /// <summary>배치 자동 실행이 부를 공개 엔트리포인트(page 로드 포함).</summary>
+    public async Task AutoRunAsync(Action<double, string?>? progress, CancellationToken ct)
+    {
+        await EnsurePageAsync(ct);
+        await RunAutoAsync(progress, ct);
+    }
 
     // ---- 통합 설정(BatchProject) 브리지(2026-10-28 사용자 결정) ----
     // 배치 ①인식 결과는 편집기 인스턴스를 거쳐 통합 설정에 모이고, ②실행은 설정만 읽어
@@ -379,6 +443,9 @@ public sealed class PageEditorViewModel : ViewModelBase
         _status($"열림: {System.IO.Path.GetFileName(path)}  {_page?.Width}×{_page?.Height}");
     }
 
+    /// <summary>이미지 열림/감지/완료 전환 → 메인 VM(마법사) 구독.</summary>
+    public void NotifyPageChanged() => PageStateChanged?.Invoke(this, EventArgs.Empty);
+
     private void Ingest(PipelineResult result)
     {
         _rendered = result.RenderedPage;
@@ -403,29 +470,55 @@ public sealed class PageEditorViewModel : ViewModelBase
         return _ctx.BuildPipeline(o, i, t, r);
     }
 
+    /// <summary>인스턴스 생성 후 소유 편집기 연결 — 구독은 자식 수명(v.Lifetime)에 맞춘다.</summary>
     private TextInstanceViewModel Link(TextInstanceViewModel v)
     {
-        v.RequestRemove += x => { Instances.Remove(x); _dirty = true; CanApplyChanged?.Invoke(); };
-        v.RequestSelect += x => SelectedInstance = x;
-        v.RequestReocr += ExecuteReocrAsync;
-        v.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(TextInstanceViewModel.Include)) { _dirty = true; CanApplyChanged?.Invoke(); }
-        };
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => v.RequestRemove += h, h => v.RequestRemove -= h)
+            .Subscribe(ev =>
+            {
+                Instances.Remove((TextInstanceViewModel)ev.Sender!);
+                _dirty = true; CanApplyChanged?.Invoke(this, EventArgs.Empty);
+            })
+            .DisposeWith(v.Lifetime);
+
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => v.RequestSelect += h, h => v.RequestSelect -= h)
+            .Subscribe(ev => SelectedInstance = (TextInstanceViewModel)ev.Sender!)
+            .DisposeWith(v.Lifetime);
+
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => v.RequestReocr += h, h => v.RequestReocr -= h)
+            .Subscribe(ev => ExecuteReocrAsync((TextInstanceViewModel)ev.Sender!))
+            .DisposeWith(v.Lifetime);
+
+        Observable.FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                h => v.PropertyChanged += h, h => v.PropertyChanged -= h)
+            .Where(ev => ev.EventArgs.PropertyName == nameof(TextInstanceViewModel.Include))
+            .Subscribe(_ => { _dirty = true; CanApplyChanged?.Invoke(this, EventArgs.Empty); })
+            .DisposeWith(v.Lifetime);
+
         return v;
     }
 
     /// <summary>인스턴스 행 🔄 버튼: 이 박스 하나만 OCR 재판독(도구 모음 공용 경로와 동일 엔진 경로).</summary>
+    private bool _reocrRunning;
+
     private async void ExecuteReocrAsync(TextInstanceViewModel sel)
     {
         if (sel == null) return;
+        if (_reocrRunning) { _status("재인식 진행 중… 완료까지 잠시만 기다려주세요"); return; }
         if (_page == null) { _status("이미지 로딩 중… 잠시 후 다시 시도하세요"); await EnsurePageAsync(); }
         if (_page == null) { _status("먼저 이미지를 열어주세요"); return; }
         var rect = new BoundingBox((int)sel.Left, (int)sel.Top, (int)sel.Right, (int)sel.Bottom);
-        BeginBusy($"선택 영역 OCR 재인식 중…\n({(int)rect.Width}×{(int)rect.Height})", 0.95);
+        var ocr = _ctx.GetOcr(_keys().Ocr);
+        var needReload = ocr is IUnloadable ul && !ul.IsLoaded;
+        BeginBusy(needReload
+            ? "OCR 모델 다시 얹는 중…\n(최대 수 분 걸릴 수 있어요)\n완료 후 선택 영역을 재인식합니다"
+            : $"선택 영역 OCR 재인식 중…\n({(int)rect.Width}×{(int)rect.Height})", 0.95);
+        _reocrRunning = true;
         try
         {
-            var ocr = _ctx.GetOcr(_keys().Ocr);
             string text; double score; bool vertical;
             if (ocr is Plugins.Ocr.VlmOcr.VlmOcrEngine mo && _page != null)
             {
@@ -452,25 +545,17 @@ public sealed class PageEditorViewModel : ViewModelBase
             }
         }
         catch (Exception ex) { _status($"재인식 오류: {ex.Message}"); }
-        finally { EndBusy(); }
+        finally { _reocrRunning = false; EndBusy(); }
     }
 
     // ---- 오버레이 헬퍼 ----
+    // tick 진행 펌프 자체는 InitializeEvents의 FromEventPattern 구독이 담당 — 여기서는 ceiling/메시지/시작만.
     private void BeginBusy(string msg, double ceiling)
     {
         _busyCeiling = ceiling;
         OverlayMessage = msg;
         OverlayProgress = 0.02;
         IsBusy = true;
-        _busyTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        if (_busyTick != null) _busyTimer.Tick -= _busyTick;
-        _busyTick = (_, _) =>
-        {
-            OverlayProgress = Math.Min(_busyCeiling,
-                OverlayProgress + Math.Max(0.004, (_busyCeiling - OverlayProgress) * 0.05));
-            this.RaisePropertyChanged(nameof(OverlayPercentText));
-        };
-        _busyTimer.Tick += _busyTick;
         _busyTimer.Start();
     }
 

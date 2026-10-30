@@ -1,7 +1,8 @@
 using MangaTranslator.Core;
 using MangaTranslator.Core.Imaging;
 using ReactiveUI;
-using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
+using ReactiveUI.Primitives.Disposables; // WhenActivated 블록 파라미터 MultipleDisposable
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.ViewModels;
 
@@ -15,8 +16,9 @@ public sealed record ToneOption(SpeechTone Tone, string Label);
 /// 사용자 편집 가능한 텍스트 인스턴스(사각형). Step1(감지) 이후 좌표·내용을
 /// 추가/삭제/수정할 수 있고, Apply 시 TextRegion으로 변환되어 전달된다.
 /// </summary>
-public sealed class TextInstanceViewModel : ReactiveObject
+public sealed class TextInstanceViewModel : ViewModelBase
 {
+    // Lifetime/Activator/ActivateLifetime — ViewModelBase 상속 (구독은 .DisposeWith(Lifetime)).
     private double _left, _top, _right, _bottom;
     private string _text = "";
     private string _translatedText = "";
@@ -39,7 +41,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
     public double FontScale { get => _fontScale; set => this.RaiseAndSetIfChanged(ref _fontScale, value); }
 
     /// <summary>캔버스 클릭→선택 요청(View code-behind가 Raise).</summary>
-    public event Action<TextInstanceViewModel>? RequestSelect;
+    public event EventHandler? RequestSelect;
 
     public bool IsSelected
     {
@@ -50,7 +52,7 @@ public sealed class TextInstanceViewModel : ReactiveObject
     /// <summary>OCR 신뢰도(-1=미측정). UI 표시용.</summary>
     public double Confidence { get => _confidence; set => this.RaiseAndSetIfChanged(ref _confidence, value); }
 
-    public void RaiseSelect() => RequestSelect?.Invoke(this);
+    public void RaiseSelect() => RequestSelect?.Invoke(this, EventArgs.Empty);
 
     /// <summary>드래그 이동(px 델타).</summary>
     public void MoveBy(double dx, double dy)
@@ -179,22 +181,37 @@ public sealed class TextInstanceViewModel : ReactiveObject
     public double Width => Math.Max(0, Right - Left);
     public double Height => Math.Max(0, Bottom - Top);
 
-    public ReactiveCommand<RxVoid, RxVoid> RemoveCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> RemoveCommand { get; private set; } = null!;
 
-    public event Action<TextInstanceViewModel>? RequestRemove;
+    public event EventHandler? RequestRemove;
     /// <summary>🔄 버튼: 이 instance 하나만 OCR 재판독 요청 — 소유 편집기(PageEditor)가 구독 실행.</summary>
-    public event Action<TextInstanceViewModel>? RequestReocr;
+    public event EventHandler? RequestReocr;
 
     /// <summary>이 박스만 재인식(행 버튼 ✕ 옆 🔄).</summary>
-    public ReactiveCommand<RxVoid, RxVoid> ReocrCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> ReocrCommand { get; private set; } = null!;
 
     /// <summary>페이지 요소임을 갖는 요소도 대표 파일 경로 — 편집 재인식 시 원본 특정.</summary>
     public string? SourcePath { get; set; }
 
     public TextInstanceViewModel()
     {
-        RemoveCommand = ReactiveCommand.Create(() => RequestRemove?.Invoke(this));
-        ReocrCommand = ReactiveCommand.Create(() => RequestReocr?.Invoke(this));
+        this.WhenActivated((MultipleDisposable d) => InitializeCommands(d));
+        ActivateLifetime();
+    }
+
+    private void InitializeCommands(MultipleDisposable d)
+    {
+        RemoveCommand = ReactiveCommand.Create(() => RequestRemove?.Invoke(this, EventArgs.Empty)).DisposeWith(d);
+        ReocrCommand = ReactiveCommand.Create(() => RequestReocr?.Invoke(this, EventArgs.Empty)).DisposeWith(d);
+    }
+
+    protected override void DisposeCore()
+    {
+        RemoveCommand.Dispose();
+        ReocrCommand.Dispose();
+        RequestRemove = null;
+        RequestSelect = null;
+        RequestReocr = null;
     }
 
     public static TextInstanceViewModel FromRegion(TextRegion r) => new()

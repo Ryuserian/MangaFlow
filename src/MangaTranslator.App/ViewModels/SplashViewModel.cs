@@ -3,7 +3,8 @@ using Avalonia.Threading;
 using MangaTranslator.App.Services;
 using MangaTranslator.ModelManager;
 using ReactiveUI;
-using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
+using ReactiveUI.Primitives.Disposables; // WhenActivated 블록 파라미터 MultipleDisposable
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.ViewModels;
 
@@ -14,7 +15,7 @@ namespace MangaTranslator.App.ViewModels;
 /// [⬇ 모델 다운로드]로 HF에서 자동 확보(이어받기·sha256 검증은 ModelDownloader).
 /// ✕ = 앱 종료(CloseRequested → App.Shutdown). 건너뛰기는 웹 번역 폴백으로 메인 진입.
 /// </summary>
-public sealed class SplashViewModel : ViewModelBase, IDisposable
+public sealed class SplashViewModel : ViewModelBase
 {
     private double _progress;
     private string _message = "모델 저장소 점검 중…";
@@ -25,9 +26,9 @@ public sealed class SplashViewModel : ViewModelBase, IDisposable
     private int _ready; // 0/1 — 이중 발동 방지
 
     /// <summary>전 스테이지 종료(성패 무관 — ✕ 종료는 제외). App이 메인 창으로 전환.</summary>
-    public event Action? Ready;
+    public event EventHandler? Ready;
     /// <summary>✕ 누름 — 진행 스테이지 취소 후 앱 종료 요청. App이 Shutdown 처리.</summary>
-    public event Action? CloseRequested;
+    public event EventHandler? CloseRequested;
 
     public double Progress { get => _progress; private set => this.RaiseAndSetIfChanged(ref _progress, value); }
     public string Message { get => _message; private set => this.RaiseAndSetIfChanged(ref _message, value); }
@@ -64,17 +65,32 @@ public sealed class SplashViewModel : ViewModelBase, IDisposable
     /// <summary>선택지 유무 — ComboBox 표시 제어.</summary>
     public bool HasTranslateChoice { get => _hasTranslateChoice; private set => this.RaiseAndSetIfChanged(ref _hasTranslateChoice, value); }
 
-    public ReactiveCommand<RxVoid, RxVoid> DownloadCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> SkipCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> DownloadCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> SkipCommand { get; private set; } = null!;
     /// <summary>✕ = 앱 종료: 진행 중이면 스테이지 중단 후 즉시 종료(메인 창 열지 않음).</summary>
-    public ReactiveCommand<RxVoid, RxVoid> CancelCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> CancelCommand { get; private set; } = null!;
 
     private readonly EngineContext _ctx;
 
     public SplashViewModel(EngineContext ctx)
     {
         _ctx = ctx;
-        DownloadCommand = ReactiveCommand.CreateFromTask(DownloadAndPreloadAsync);
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+
+        this.WhenActivated((MultipleDisposable d) =>
+        {
+            InitializeCommands(d);
+            InitializeEvents(d);
+        });
+        ActivateLifetime();
+
+        _timer.Start();
+        _ = AuditAsync(ctx);
+    }
+
+    private void InitializeCommands(MultipleDisposable d)
+    {
+        DownloadCommand = ReactiveCommand.CreateFromTask(DownloadAndPreloadAsync).DisposeWith(d);
         // Skip ≠ 모델 전부 생략(사용자 2026-10-25: "웹 번역만"은 성립 불가 — OCR/LaMa 필수).
         // 스킵의 실체 = 번역 GGUF(32B/14B)만 빼고 필수(OCR·LaMa·폰트)는 받고, 번역 엔진은 web_google 폴백.
         SkipCommand = ReactiveCommand.CreateFromTask(async () =>
@@ -91,19 +107,24 @@ public sealed class SplashViewModel : ViewModelBase, IDisposable
             EngineContext.TranslateKey = "web_google";
             Message = "OCR/LaMa 확보 완료 — 번역은 웹 폴백으로 메인 진입";
             await RunAsync(_ctx);
-        });
+        }).DisposeWith(d);
         CancelCommand = ReactiveCommand.Create(() =>
         {
             _cts.Cancel();
             _timer?.Stop();
             Message = "✕ 종료합니다…";
-            CloseRequested?.Invoke();
-        });
+            CloseRequested?.Invoke(this, EventArgs.Empty);
+        }).DisposeWith(d);
+    }
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _timer.Tick += (_, _) => ElapsedText = $"{_sw.Elapsed.TotalSeconds:0}초";
-        _timer.Start();
-        _ = AuditAsync(ctx);
+    private void InitializeEvents(MultipleDisposable d)
+    {
+        if (_timer == null) return;
+        Observable.FromEventPattern<EventHandler, EventArgs>(
+                h => _timer.Tick += h,
+                h => _timer.Tick -= h)
+            .Subscribe(_ => ElapsedText = $"{_sw.Elapsed.TotalSeconds:0}초")
+            .DisposeWith(d);
     }
 
     /// <summary>① 감사: 카탈로그 대비 없는 모델+총 용량. 충분하면 바로 엔진 로드.</summary>
@@ -201,10 +222,10 @@ public sealed class SplashViewModel : ViewModelBase, IDisposable
     private void FireReady()
     {
         if (Interlocked.Exchange(ref _ready, 1) == 0)
-            Ready?.Invoke();
+            Ready?.Invoke(this, EventArgs.Empty);
     }
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         _timer?.Stop();
         _cts.Dispose();

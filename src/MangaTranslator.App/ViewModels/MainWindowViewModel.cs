@@ -1,12 +1,13 @@
 using MangaTranslator.App.Services;
 using ReactiveUI;
-using ReactiveUI.Primitives; // ReactiveUI 26: Unit → RxVoid
+using ReactiveUI.Primitives.Disposables;
+using System.ComponentModel;
+using System.Reactive.Linq;
 
 namespace MangaTranslator.App.ViewModels;
 
 public enum AppMode { Single, Batch }
 
-/// <summary>번역 엔진 선택 항목 — 키는 EngineRegistry 등록명과 동일.</summary>
 public sealed record TranslateEngineOption(string Key, string Label);
 
 public sealed class MainWindowViewModel : ViewModelBase
@@ -16,7 +17,6 @@ public sealed class MainWindowViewModel : ViewModelBase
     private AppMode _mode = AppMode.Single;
     private string _statusText = "이미지를 열어보세요 — PP-OCR det + Qwen3-VL rec / LaMa / Qwen3 번역 / Skia 고정 연결";
 
-    /// <summary>싱글 편집기 — 캔버스·편집 UI의 단일 진실 units(PageEditor).</summary>
     public PageEditorViewModel Single { get; }
     public BatchModeViewModel Batch { get; }
 
@@ -32,8 +32,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // 라디오 TwoWay 바인딩의 착지점: value=true일 때만 모드 전환(선택된 라디오만 true가 들어옴).
-    // setter 없으면 클릭이 조용히 무시되어 배치 UI에 고착됨(버그 2026-10-25: 되돌아오지 않음).
     public bool IsSingle
     {
         get => SelectedMode == AppMode.Single;
@@ -45,9 +43,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         set { if (value) SelectedMode = AppMode.Batch; }
     }
 
-    /// <summary>캔버스가 표시할 편집기: 모드=배치 && (선택 항목 → 펼친 항목 → 싱글) 순.
-    /// 배치 Expander 펼침=캔버스(2026-10-25) + 큐 선택만으로도 즉시 전환(2026-10-28:
-    /// "인식된 이미지 세트 선택하면 이미지 보이는 게 바뀌어야 함").</summary>
     public PageEditorViewModel? ActiveEditor
     {
         get
@@ -62,12 +57,10 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    /// <summary>배치 활성 편집기 변경 → 캔버스 바인딩 다시 해석.</summary>
     public void RaiseActiveEditor() => this.RaisePropertyChanged(nameof(ActiveEditor));
 
     public string StatusText { get => _statusText; private set => this.RaiseAndSetIfChanged(ref _statusText, value); }
 
-    // ---- 번역 엔진 런타임 선택(콤보) — EngineContext.TranslateKey에 반영, 파이프라인은 매 실행 시 라이브 읽기 ----
     public IReadOnlyList<TranslateEngineOption> TranslateEngineOptions { get; } = new[]
     {
         new TranslateEngineOption("qwen_gguf", "Qwen3 GGUF (로컬·무료)"),
@@ -89,12 +82,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    // 파일 대화상자는 View가 주입(StorageProvider)
     public Func<Task<string[]>>? PickManyAsync { get; set; }
     public Func<Task<string?>>? PickSaveAsync { get; set; }
 
-    // ---- 마법사 내비게이션 (싱글 모드 우측 패널) ----
-    // 페이지: 1=열기 2=감지 3=편집 4=실행·결과. 캔버스는 항상 유지, 패널만 페이지 전환.
     public static readonly string[] WizardStepNames = { "열기", "감지", "편집", "실행·결과" };
     private int _wizardPage = 1;
     private int _maxReachedPage = 1;
@@ -112,7 +102,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    /// <summary>과거에 도달한 최대 페이지 — 스텝칩 클릭 가능 범위 게이트.</summary>
     public int MaxReachedPage => _maxReachedPage;
 
     public bool CanBack => _wizardPage > 1 && !AnyBusy;
@@ -130,7 +119,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         3 => "다음: 번역 실행 ▶",
         _ => "✓ 완료 — 저장하세요",
     };
-    /// <summary>정삭 페이지 도달 가능 여부(스텝바 클릭 게이트) — 이미 방문했던 페이지는 자유 이동.</summary>
     public bool CanJump(int page) => page >= 1 && page <= _maxReachedPage && !AnyBusy;
 
     private void RaiseNav()
@@ -144,8 +132,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ReactiveCommand<RxVoid, RxVoid> NextCommand { get; private set; } = null!;
     public ReactiveCommand<string, RxVoid> GoPageCommand { get; private set; } = null!;
 
-    public ReactiveCommand<RxVoid, RxVoid> OpenImageCommand { get; }
-    public ReactiveCommand<RxVoid, RxVoid> SaveResultCommand { get; }
+    public ReactiveCommand<RxVoid, RxVoid> OpenImageCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> SaveResultCommand { get; private set; } = null!;
+    public ReactiveCommand<RxVoid, RxVoid> CancelAllCommand { get; private set; } = null!;
 
     public MainWindowViewModel(EngineContext ctx)
     {
@@ -159,30 +148,18 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         Single = new PageEditorViewModel(ctx, keys, setStatus);
         Batch = new BatchModeViewModel(ctx, keys, setStatus);
-        Batch.ActiveEditorChanged += RaiseActiveEditor;
 
-        // 서브 VM 진행 상태를 집계 → 전역 오버레이(취소 포함)가 소비
-        Single.PropertyChanged += (_, e) =>
+        this.WhenActivated((MultipleDisposable d) =>
         {
-            if (e.PropertyName is nameof(PageEditorViewModel.IsBusy)
-                or nameof(PageEditorViewModel.OverlayProgress)
-                or nameof(PageEditorViewModel.OverlayMessage)) NotifyBusy();
-            if (e.PropertyName == nameof(PageEditorViewModel.Step)) OnSingleStepChanged();
-            if (e.PropertyName == nameof(PageEditorViewModel.PagePath) && Single.PagePath != null)
-            {
-                // 새 이미지 로드 → 자동 ②감지 페이지로 (max 리셋)
-                _maxReachedPage = 1;
-                WizardPage = 2;
-            }
-        };
-        Batch.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName is nameof(BatchModeViewModel.IsRunning)
-                or nameof(BatchModeViewModel.BusyProgress)
-                or nameof(BatchModeViewModel.BusyMessage)) NotifyBusy();
-        };
+            InitializeCommands(d);
+            InitializeEvents(d);
+            InitializeProperties(d);
+        });
+        ActivateLifetime();
+    }
 
-        // 다중 열기: 1장이면 싱글 편집 화면, 여러 장이면 첫 장은 싱글 + 나머지는 배치 대기열
+    private void InitializeCommands(MultipleDisposable d)
+    {
         OpenImageCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (PickManyAsync == null) return;
@@ -191,32 +168,24 @@ public sealed class MainWindowViewModel : ViewModelBase
             await Single.LoadFromAsync(paths[0]);
             if (paths.Length > 1)
             {
-                Batch.AddPaths(paths.Skip(1));
+                Batch.AddPaths(paths);
                 SelectedMode = AppMode.Batch;
-                setStatus($"이미지 {paths.Length}장 열림 — 배치 실행으로 연속 처리");
+                StatusText = $"이미지 {paths.Length}장 열림 — 모두 대기열, 배치 실행으로 연속 처리";
             }
-        });
+        }).DisposeWith(d);
 
         SaveResultCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (PickSaveAsync == null) return;
             var path = await PickSaveAsync();
             if (path != null) Single.SaveResultTo(path);
-        });
+        }).DisposeWith(d);
 
-        Single.CanApplyChanged += () => { this.RaisePropertyChanged(nameof(CanApply)); RaiseNav(); };
-        WireCancel();
-        WireWizard();
-    }
-
-    // ---- 마법사 커맨드 배선 ----
-    private void WireWizard()
-    {
         BackCommand = ReactiveCommand.Create(() =>
         {
             if (!CanBack) return;
             WizardPage = _wizardPage - 1;
-        });
+        }).DisposeWith(d);
 
         // Avalonia 버튼은 자신이 바인딩한 커맨드의 Execute()만 구독한다.
         // 코드에서 다른 ReactiveCommand의 Execute()를 호출하면 IObservable이 구독 없이 dispose되어
@@ -231,17 +200,15 @@ public sealed class MainWindowViewModel : ViewModelBase
                     break;
                 case 2:
                     if (Single.PagePath == null) { StatusText = "먼저 이미지를 열어주세요"; return; }
-                    // 감지 실행 → Step=Detected 이벤트가 자동 ③편집으로 전환
                     await Run(Single.DetectCommand);
                     break;
                 case 3:
                     if (!CanApply) { StatusText = "☑된 말풍선이 있어야 다음으로 갈 수 있어요"; return; }
-                    // 라벨대로 번역도 이어서 실행 — 페이지만 넘어가고 놀리는 UX 제거(사용자 피드백)
                     WizardPage = 4;
                     await Run(Single.ApplyCommand);
                     break;
             }
-        });
+        }).DisposeWith(d);
 
         // AXAML의 CommandParameter="1"은 문자열로 전달된다(int 오토컨버전 없음 — 실측 예외) → 문자열 파싱.
         GoPageCommand = ReactiveCommand.Create<string>(p =>
@@ -249,14 +216,77 @@ public sealed class MainWindowViewModel : ViewModelBase
             if (!int.TryParse(p, out var page)) return;
             if (!CanJump(page)) return;
             WizardPage = page;
-        });
+        }).DisposeWith(d);
+
+        CancelAllCommand = ReactiveCommand.Create(() =>
+        {
+            if (Batch.IsRunning) Batch.CancelActive();
+            else Single.CancelActive();
+        }, WhenProp(nameof(AnyBusy), () => AnyBusy)).DisposeWith(d);
     }
 
-    /// <summary>ReactiveCommand.Execute()를 구독→Task로 감싼다. 실행 예외는 StatusText로 노출.</summary>
+    private void InitializeEvents(MultipleDisposable d)
+    {
+        Observable.FromEventPattern(
+                h => Batch.ActiveEditorChanged += h,
+                h => Batch.ActiveEditorChanged -= h)
+            .Subscribe(_ => RaiseActiveEditor())
+            .DisposeWith(d);
+
+        Observable.FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                h => Single.PropertyChanged += h,
+                h => Single.PropertyChanged -= h)
+            .Subscribe(ev =>
+            {
+                var n = ev.EventArgs.PropertyName;
+                if (n is nameof(PageEditorViewModel.IsBusy)
+                    or nameof(PageEditorViewModel.OverlayProgress)
+                    or nameof(PageEditorViewModel.OverlayMessage)) NotifyBusy();
+                if (n == nameof(PageEditorViewModel.Step)) OnSingleStepChanged();
+                if (n == nameof(PageEditorViewModel.PagePath) && Single.PagePath != null)
+                {
+                    _maxReachedPage = 1;
+                    WizardPage = 2;
+                }
+            })
+            .DisposeWith(d);
+
+        Observable.FromEventPattern<PropertyChangedEventHandler, PropertyChangedEventArgs>(
+                h => Batch.PropertyChanged += h,
+                h => Batch.PropertyChanged -= h)
+            .Where(ev => ev.EventArgs.PropertyName is nameof(BatchModeViewModel.IsRunning)
+                                         or nameof(BatchModeViewModel.BusyProgress)
+                                         or nameof(BatchModeViewModel.BusyMessage))
+            .Subscribe(_ => NotifyBusy())
+            .DisposeWith(d);
+
+        Observable.FromEventPattern(
+                h => Single.CanApplyChanged += h,
+                h => Single.CanApplyChanged -= h)
+            .Subscribe(_ => { this.RaisePropertyChanged(nameof(CanApply)); RaiseNav(); })
+            .DisposeWith(d);
+
+        Observable.FromEventPattern(
+                h => Single.PageStateChanged += h,
+                h => Single.PageStateChanged -= h)
+            .Subscribe(_ => OnSingleStepChanged())
+            .DisposeWith(d);
+    }
+
+    private void InitializeProperties(MultipleDisposable d)
+    {
+        WhenProp(nameof(AnyBusy), () => AnyBusy)
+            .Subscribe(_ => RaiseNav())
+            .DisposeWith(d);
+
+        WhenProp(nameof(SelectedMode), () => SelectedMode)
+            .Subscribe(_ => this.RaisePropertyChanged(nameof(ActiveEditor)))
+            .DisposeWith(d);
+    }
+
     private async Task Run(ReactiveCommand<RxVoid, RxVoid> cmd)
     {
         var tcs = new TaskCompletionSource();
-        // 확장 Subscribe는 RxVoid extension과 BCL이 모호 → IObserver 인터페이스 직접 호출
         cmd.Execute().Subscribe(new ObserverSink(tcs, ex => StatusText = $"오류: {ex.Message}"));
         try { await tcs.Task; }
         catch { /* 취소 등 — 자식 커맨드가 StatusText에 남김 */ }
@@ -275,7 +305,6 @@ public sealed class MainWindowViewModel : ViewModelBase
         public void OnNext(RxVoid value) { }
     }
 
-    /// <summary>감지/적용 단계 변화 → 페이지 자동 전환(워즈 뒤로가기로 재편집 후 재감지 시에도 정상).</summary>
     private void OnSingleStepChanged()
     {
         switch (Single.Step)
@@ -288,10 +317,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         RaiseNav();
     }
 
-    /// <summary>Step2 버튼 활성 조건(UI용): ☑(Include)된 인스턴스가 하나라도 있으면.</summary>
     public bool CanApply => Single.Step == AppStep.Detected && Single.Instances.Any(i => i.Include);
 
-    // ---- 전역 오버레이: 어느 모드든 작업 중이면 화면 전체(이미지+우측패널)에 진행률 ----
     public bool AnyBusy => Single.IsBusy || Batch.IsRunning;
     public string BusyMessage => Single.IsBusy ? Single.OverlayMessage : Batch.BusyMessage;
     public double BusyProgress => Single.IsBusy ? Single.OverlayProgress : Batch.BusyProgress;
@@ -301,16 +328,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         this.RaisePropertyChanged(nameof(AnyBusy));
         this.RaisePropertyChanged(nameof(BusyMessage));
         this.RaisePropertyChanged(nameof(BusyProgress));
-        RaiseNav(); // 진행 중/완료로 이전·다음 활성 상태 바뀜
-        RaiseActiveEditor(); // 배치 펼침 상태도 진행 게이트에 재평가
+        RaiseNav();
+        RaiseActiveEditor();
     }
 
-    public ReactiveCommand<RxVoid, RxVoid> CancelAllCommand { get; private set; } = null!;
-    private void WireCancel() =>
-        CancelAllCommand = ReactiveCommand.Create(() =>
-        {
-            // 활성 모드 기준 취소 — 배치 중이면 배치, 아니면 싱글
-            if (Batch.IsRunning) Batch.CancelActive();
-            else Single.CancelActive();
-        }, this.WhenAnyValue(x => x.AnyBusy));
+    protected override void DisposeCore()
+    {
+        Single.Dispose();
+        Batch.Dispose();
+    }
 }
