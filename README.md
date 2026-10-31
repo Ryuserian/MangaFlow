@@ -1,4 +1,4 @@
-# Manga Translator — 日本語 → 한국어 만화 번역기 (local-first)
+# MangaFlow — 日本語 → 한국어 만화 번역기 (local-first)
 
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Avalonia](https://img.shields.io/badge/UI-Avalonia_12-1A9BE0?style=flat)](https://avaloniaui.net/)
@@ -98,19 +98,19 @@
 
 ```bash
 git clone <repo> && cd Manga
-dotnet build MangaTranslator.slnx
-dotnet run --project src/MangaTranslator.App          # GUI
+dotnet build MangaFlow.slnx
+dotnet run --project src/MangaFlow.App          # GUI
 ```
 
 첫 실행: 스플래시 → **📥 모델 다운로드 선택** (OCR rec Qwen3-VL ≈18GB 필수 포함. 번역은 **32B 권장 ≈22GB** — 드롭다운에서 14B ≈13GB 선택 가능) → 엔진 자동 로드 → 이미지 열면 끝. 큰 GGUF는 첫 인식·번역 시점에 GPU에 오름(순차 상재). ✕는 진행 중 앱 종료(이어받기 유지).
 
 ```bash
 # CLI 검증 (GUI 없이)
-dotnet run --project src/MangaTranslator.App -- --smoke
-dotnet run --project src/MangaTranslator.App -- --pipeline <in.jpg> [out.png]   # ①→⑤ 종단 (중간산물 <in>.clean.png)
-dotnet run --project src/MangaTranslator.App -- --audit            # 모델 감사
-dotnet run --project src/MangaTranslator.App -- --ocrtest <in.png> [annot.png]  # OCR 실모델 검출+리포트
-dotnet run --project src/MangaTranslator.App -- --inpaintdiff <orig> <clean>     # inpaint 박스 밖 침범 계측
+dotnet run --project src/MangaFlow.App -- --smoke
+dotnet run --project src/MangaFlow.App -- --pipeline <in.jpg> [out.png]   # ①→⑤ 종단 (중간산물 <in>.clean.png)
+dotnet run --project src/MangaFlow.App -- --audit            # 모델 감사
+dotnet run --project src/MangaFlow.App -- --ocrtest <in.png> [annot.png]  # OCR 실모델 검출+리포트
+dotnet run --project src/MangaFlow.App -- --inpaintdiff <orig> <clean>     # inpaint 박스 밖 침범 계측
 ```
 
 **요구**: .NET 8 SDK (런타임 8/9/10 호환, `RollForward=LatestMajor`). 모델 캐시 `MANGA_MODELS_DIR` env(기본 `models/`).
@@ -169,11 +169,11 @@ dotnet run --project src/MangaTranslator.App -- --inpaintdiff <orig> <clean>    
 
 ```
 src/
-├─ MangaTranslator.Core          # 의존성 0: ImageData·TextRegion(Tone 포함)·인터페이스·파이프라인·NumberedBatchProtocol
-├─ MangaTranslator.ModelManager  # 카탈로그(repo/파일/sha256) — 모델 다운로드 단일 진실원
-├─ MangaTranslator.Plugins.*     # Ocr.PpOcr · Ocr.VlmOcr · Ocr.VlmQwen · Inpaint.Lama
+├─ MangaFlow.Core          # 의존성 0: ImageData·TextRegion(Tone 포함)·인터페이스·파이프라인·NumberedBatchProtocol
+├─ MangaFlow.ModelManager  # 카탈로그(repo/파일/sha256) — 모델 다운로드 단일 진실원
+├─ MangaFlow.Plugins.*     # Ocr.PpOcr · Ocr.VlmOcr · Ocr.VlmQwen · Inpaint.Lama
 │                                # Translate.QwenGguf · Translate.WebApi(google/deepl/openai) · Render.Skia
-└─ MangaTranslator.App           # Avalonia GUI: 스플래시(엔진 프리로드+다운로더) /
+└─ MangaFlow.App           # Avalonia GUI: 스플래시(엔진 프리로드+다운로더) /
                                  #   PageEditor(편집 units: 캔버스·감지·말투·방향·크기) — 싱글=마법사,
                                  #   배치=파일별 Expander가 PageEditor 재사용 · smoke CLI(--pipeline/--ocrtest/…)
 ```

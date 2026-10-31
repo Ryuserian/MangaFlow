@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- det는 PpOcrEngine 재사용, rec는 IVlmRecEngine(Qwen3-VL). ONNX runtime은 PpOcr 프로젝트가 끌어옴.
+         (manga-ocr ONNX rec 폴백 삭제 2026-10-26 → 직접 ORT 참조 불요) -->
+    <ProjectReference Include="..\MangaFlow.Core\MangaFlow.Core.csproj" />
+    <ProjectReference Include="..\MangaFlow.Plugins.Ocr.PpOcr\MangaFlow.Plugins.Ocr.PpOcr.csproj" />
+  </ItemGroup>
+
+</Project>

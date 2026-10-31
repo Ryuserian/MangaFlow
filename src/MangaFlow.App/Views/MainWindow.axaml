@@ -1,0 +1,520 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:MangaFlow.App.ViewModels"
+        xmlns:conv="using:MangaFlow.App.Services"
+        x:Class="MangaFlow.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="MangaFlow"
+        Width="1360" Height="860"
+        WindowStartupLocation="CenterScreen"
+        RequestedThemeVariant="Light">
+
+  <!-- 라이트 트렌디 리프레시(2026-10-25 사용자 요청): 오프화이트 배경+흰 카드+그림자
+       + 브랜드 오렌지 액센트. 캔버스_annotation_색은 이미지 위라 그대로 유지. -->
+
+  <Window.Styles>
+    <!-- 흰 카드: 부드러운 경계+그림자 (레딘 illetve 플로팅) -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="#FFFFFFFF"/>
+      <Setter Property="CornerRadius" Value="14"/>
+      <Setter Property="Padding" Value="14"/>
+      <Setter Property="BorderBrush" Value="#14000000"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="BoxShadow" Value="0 6 24 0 #10000000"/>
+    </Style>
+    <!-- 모드 토글 세그먼트 -->
+    <Style Selector="RadioButton.seg">
+      <Setter Property="Padding" Value="14,6"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <!-- 코너 리사이즈 핸들 -->
+    <Style Selector="Ellipse.handle">
+      <Setter Property="Width" Value="18"/>
+      <Setter Property="Height" Value="18"/>
+      <Setter Property="Fill" Value="#FFFF6D00"/>
+      <Setter Property="Stroke" Value="#FFFFFFFF"/>
+      <Setter Property="StrokeThickness" Value="1.5"/>
+    </Style>
+    <Style Selector="TextBlock.step">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#CC1D2129"/>
+    </Style>
+    <Style Selector="TextBox.num">
+      <Setter Property="Width" Value="56"/>
+    </Style>
+    <!-- 마법사 스텝칩 -->
+    <Style Selector="Button.stepchip">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="2"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#CC1D2129"/>
+    </Style>
+    <Style Selector="Button.stepchip:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#0D1D2129"/>
+    </Style>
+    <!-- 플랫 버튼: 은은한 그레이 칩 -->
+    <Style Selector="Button.flat">
+      <Setter Property="Background" Value="#0D1D2129"/>
+    </Style>
+    <!-- 액센트 CTA: 브랜드 오렌지 filled pill -->
+    <Style Selector="Button.accent">
+      <Setter Property="Background" Value="#FFFF6D00"/>
+      <Setter Property="Foreground" Value="#FFFFFFFF"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="CornerRadius" Value="9"/>
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FFE06300"/>
+    </Style>
+    <Style Selector="Button.accent:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FFC75700"/>
+    </Style>
+    <!-- 배치 Expander: 은은한 톤 카드 -->
+    <Style Selector="Expander.page">
+      <Setter Property="Background" Value="#FFF8F9FC"/>
+      <Setter Property="CornerRadius" Value="10"/>
+      <Setter Property="Padding" Value="4,2"/>
+    </Style>
+    <Style Selector="Expander.page TextBlock.fname">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+  </Window.Styles>
+
+  <Window.Resources>
+    <!-- 말풍선 instance 편집 행 — 싱글 ListBox와 배치 Expander가 공유(단일 진실 units).
+         사용자 2026-10-25: 🔁 OCR는 툴바에서 빼고 행(✕ 옆)으로 — 한 instance만 재판독. -->
+    <DataTemplate x:Key="InstanceEditTemplate" x:DataType="vm:TextInstanceViewModel">
+      <StackPanel Spacing="2">
+        <!-- 읽기 방향 ComboBox(사용자 2026-10-26): 가로/세로 × 시작(왼쪽/오른쪽) 4택.
+             아이콘: 활살(arrowhead) 위치 = 첫 행/열의 시작 변. 한국어 번역 기본=가로 왼쪽부터. -->
+        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+          <CheckBox IsChecked="{Binding Include, Mode=TwoWay}"
+                  ToolTip.Tip="번역 대상 — 체크된 말풍선만 일본어 제거 + 번역 + 재조판. 해제 시 원본 보존"/>
+          <TextBlock Grid.Column="1" Text="번역" FontSize="10" Foreground="#8C1D2129"
+                   VerticalAlignment="Center" Margin="2,0,8,0"/>
+          <TextBlock Grid.Column="2" Text="{Binding Text}" Margin="0,0,4,0"
+                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Foreground="{Binding Confidence, Converter={x:Static conv:ConfidenceLowToBrushConverter.Instance}}"
+                   FontSize="12"
+                   Opacity="{Binding Include, Converter={x:Static conv:IncludeToOpacityConverter.Instance}}"/>
+          <Button Grid.Column="3" Content="🔄" Classes="flat" Command="{Binding ReocrCommand}"
+                  ToolTip.Tip="이 사각형만 OCR 재인식" Padding="6,2"/>
+          <Button Grid.Column="4" Content="✕" Classes="flat" Command="{Binding RemoveCommand}" Padding="6,2"/>
+        </Grid>
+        <Grid ColumnDefinitions="Auto,Auto" Margin="26,0,0,2">
+          <ComboBox ItemsSource="{x:Static vm:TextInstanceViewModel.ReadingDirs}"
+                   SelectedItem="{Binding ReadingDirOption, Mode=TwoWay}"
+                   FontSize="11" Padding="4,1" Width="132" Height="24" MinHeight="24"
+                   ToolTip.Tip="읽기 방향 — 재조판이 시작되는 모서리와 진행 순서 (세로 오른쪽=일본 만화 관행, 가로 왼쪽=한국어 기본)">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ReadingDirOption">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <Canvas Width="14" Height="14" VerticalAlignment="Center">
+                    <Path Data="{Binding IconData}" Stroke="#FF1D2129" StrokeThickness="1.6"
+                          StrokeLineCap="Round" StrokeJoin="Round"/>
+                  </Canvas>
+                  <TextBlock Text="{Binding Label}" VerticalAlignment="Center" FontSize="11"/>
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <ComboBox Grid.Column="1" ItemsSource="{x:Static vm:TextInstanceViewModel.ToneOptions}"
+                   SelectedItem="{Binding ToneOption, Mode=TwoWay}"
+                   FontSize="11" Padding="4,1" Width="92" Height="24" MinHeight="24" Margin="4,0,0,0"
+                   ToolTip.Tip="말투 — 여성형/남성형 어투로 번역. 자동이면 원문(私/僕 등)으로 추정"/>
+        </Grid>
+        <!-- 저신뢰 경고: 빨간 라벨 -->
+        <TextBlock Text="⚠ 인식 신뢰도 낮음 — 원문을 확인하세요" FontSize="9" Foreground="#FFD92D20"
+                   Margin="26,0,0,0"
+                   IsVisible="{Binding Confidence, Converter={x:Static conv:ConfidenceLowConverter.Instance}}"/>
+        <!-- 선택된 항목만 원문 편집 + 크기 노브 인라인 -->
+        <StackPanel IsVisible="{Binding IsSelected}" Margin="26,2,0,6" Spacing="4">
+          <Grid ColumnDefinitions="Auto,*,Auto">
+            <TextBlock Text="글자 크기" FontSize="10" Foreground="#991D2129" VerticalAlignment="Center"/>
+            <Slider Grid.Column="1" Minimum="0.5" Maximum="3"
+                    Value="{Binding FontScale, Mode=TwoWay}"
+                    Margin="8,0" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="2" Text="{Binding FontScale, StringFormat=P0}"
+                     FontSize="10" Foreground="#661D2129" VerticalAlignment="Center" MinWidth="34" TextAlignment="Right"/>
+          </Grid>
+          <TextBox Text="{Binding Text, Mode=TwoWay}" AcceptsReturn="True" TextWrapping="Wrap"
+                   MinHeight="40" Background="#0D1D2129" BorderThickness="0" FontSize="12"/>
+          <SelectableTextBlock Text="{Binding TranslatedText}" TextWrapping="Wrap"
+                               Foreground="#FFEA580C" FontSize="12"
+                               IsVisible="{Binding TranslatedText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        </StackPanel>
+      </StackPanel>
+    </DataTemplate>
+  </Window.Resources>
+
+  <!-- 루트 Grid(Auto,*,Auto): 오버레이가 RowSpan=3으로 창 전체를 덮는다.
+       DockPanel flat 구조에서는 마지막 child(오버레이)가 '남은的空间'만 받아 오른쪽으로 밀림(버그 2026-10-25). -->
+  <Grid RowDefinitions="Auto,*,Auto" Background="#FFF6F7FA">
+
+    <!-- ===== 상단 바: 흰 플로팅 ===== -->
+    <Border Grid.Row="0" Padding="18,10" Background="#FFFFFFFF"
+            BorderBrush="#14000000" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+          <!-- 브랜드 로고(자작): 말풍선+플로우 오렌지 아이콘 -->
+          <Image Source="avares://MangaFlow.App/Assets/logo_256.png" Width="30" Height="30"
+                 VerticalAlignment="Center"/>
+          <TextBlock Text="MangaFlow" FontSize="16" FontWeight="Bold" Foreground="#FF1D2129" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <Border Grid.Column="1" Margin="24,0,0,0" Background="#FFF1F2F6" CornerRadius="9"
+                VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <RadioButton Classes="seg" GroupName="mode" Content="싱글" Foreground="#FF1D2129"
+                         IsChecked="{Binding IsSingle, Mode=TwoWay}"/>
+            <RadioButton Classes="seg" GroupName="mode" Content="배치" Foreground="#FF1D2129"
+                         IsChecked="{Binding IsBatch, Mode=TwoWay}"/>
+          </StackPanel>
+        </Border>
+
+        <!-- 공용 열기(2026-10-25 통합): 배치 '＋ 파일 추가'와 대화상자 중복 제거.
+             여러 장 선택 시 첫 장=싱글 캔버스+전체=배치 대기열(OpenImageCommand 내부 규칙). -->
+        <Button Grid.Column="3" Content="📂  열기" Command="{Binding OpenImageCommand}"
+                Classes="accent" Padding="14,7" VerticalAlignment="Center"/>
+      </Grid>
+    </Border>
+
+    <!-- ===== 하단 스테이터스 ===== -->
+    <Border Grid.Row="2" Padding="18,6" Background="#FFFFFFFF"
+            BorderBrush="#14000000" BorderThickness="0,1,0,0">
+      <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="#991D2129"/>
+    </Border>
+
+    <!-- ===== 공통 2컬럼: 캔버스(ActiveEditor) | 우측 패널(마법사/배치 대기열) ===== -->
+    <Grid Grid.Row="1" ColumnDefinitions="*,360" Margin="14,14,14,10">
+
+      <!-- 캔버스 — ActiveEditor: 배치에서 Expander 펼친 장이 곧 편집 대상(2026-10-25) -->
+      <Border Classes="card" Padding="6" Margin="0,0,14,0">
+        <Grid>
+          <!-- 빈 상태 -->
+          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8"
+                      IsVisible="{Binding ActiveEditor.Display, Converter={x:Static ObjectConverters.IsNull}}">
+            <TextBlock Text="📄" FontSize="44" HorizontalAlignment="Center"/>
+            <TextBlock Text="이미지를 열어보세요" FontSize="16" Foreground="#8C1D2129"/>
+            <TextBlock Text="JPG · PNG · WEBP — 말풍선을 자동 인식합니다" FontSize="12"
+                     Foreground="#591D2129" HorizontalAlignment="Center"/>
+          </StackPanel>
+
+          <ScrollViewer>
+            <Viewbox Stretch="Uniform" Margin="8">
+              <Grid>
+                <Image Source="{Binding ActiveEditor.Display}"/>
+                <ItemsControl ItemsSource="{Binding ActiveEditor.Instances}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:TextInstanceViewModel">
+                      <!-- ItemsControl 템플릿 루트의 Canvas.Left/Top은 컨테이너로 승격되지
+                           않아 offset 캔버스로 감싼다(Avalonia 12 호환). -->
+                      <Canvas Width="0" Height="0">
+                        <!-- ☐ 제외된 박스는 흐림(0.28) — 원본 보존 표시 -->
+                        <Rectangle Canvas.Left="{Binding Left}" Canvas.Top="{Binding Top}"
+                                   Width="{Binding Width}" Height="{Binding Height}"
+                                   Opacity="{Binding Include, Converter={x:Static conv:IncludeToOpacityConverter.Instance}}"
+                                   Stroke="{Binding IsSelected, Converter={x:Static conv:SelectedToStrokeBrushConverter.Instance}}"
+                                   StrokeThickness="{Binding IsSelected, Converter={x:Static conv:SelectedToStrokeThicknessConverter.Instance}}"
+                                   Fill="{Binding IsSelected, Converter={x:Static conv:SelectedToFillConverter.Instance}}"
+                                   Cursor="Hand"
+                                   PointerPressed="OnRectPointerPressed"
+                                   PointerMoved="OnRectPointerMoved"
+                                   PointerReleased="OnRectPointerReleased"/>
+                        <!-- 선택 시 코너 4개 리사이즈 핸들 -->
+                        <Ellipse Classes="handle" Tag="0" IsVisible="{Binding IsSelected}"
+                                 Canvas.Left="{Binding H0X}" Canvas.Top="{Binding H0Y}"
+                                 Cursor="Cross"
+                                 PointerPressed="OnHandlePressed" PointerMoved="OnHandleMoved" PointerReleased="OnHandleReleased"/>
+                        <Ellipse Classes="handle" Tag="1" IsVisible="{Binding IsSelected}"
+                                 Canvas.Left="{Binding H1X}" Canvas.Top="{Binding H1Y}"
+                                 Cursor="Cross"
+                                 PointerPressed="OnHandlePressed" PointerMoved="OnHandleMoved" PointerReleased="OnHandleReleased"/>
+                        <Ellipse Classes="handle" Tag="2" IsVisible="{Binding IsSelected}"
+                                 Canvas.Left="{Binding H2X}" Canvas.Top="{Binding H2Y}"
+                                 Cursor="Cross"
+                                 PointerPressed="OnHandlePressed" PointerMoved="OnHandleMoved" PointerReleased="OnHandleReleased"/>
+                        <Ellipse Classes="handle" Tag="3" IsVisible="{Binding IsSelected}"
+                                 Canvas.Left="{Binding H3X}" Canvas.Top="{Binding H3Y}"
+                                 Cursor="Cross"
+                                 PointerPressed="OnHandlePressed" PointerMoved="OnHandleMoved" PointerReleased="OnHandleReleased"/>
+                      </Canvas>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Grid>
+            </Viewbox>
+          </ScrollViewer>
+
+        </Grid>
+      </Border>
+
+      <!-- ===== 우측 패널 Border: 모드에 따라 마법사 / 배치 대기열 ===== -->
+      <!-- Border(Decorator)는 자식 1개 — 두 DockPanel을 Grid로 감싼다(실측 AVLN 오류) -->
+      <Border Grid.Column="1" Classes="card">
+      <Grid>
+
+        <!-- ===== SINGLE: 마법사(DockPanel) — 페이지 전환: ①열기 ②감지 ③편집 ④실행·결과 ===== -->
+        <DockPanel IsVisible="{Binding IsSingle}">
+
+          <!-- 스텝바 (상단 고정) — 방문했던 단계는 클릭으로 복귀 -->
+          <Grid DockPanel.Dock="Top" ColumnDefinitions="*,*,*,*" Margin="0,0,0,12">
+            <StackPanel Spacing="4">
+              <Button Command="{Binding GoPageCommand}" CommandParameter="1" Classes="stepchip">
+                <TextBlock Text="① 열기" FontSize="11"/>
+              </Button>
+              <Border Height="3" CornerRadius="2" Background="{Binding WizardPage, Converter={x:Static conv:StepBarBrushConverter.Instance}, ConverterParameter=1}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="4">
+              <Button Command="{Binding GoPageCommand}" CommandParameter="2" Classes="stepchip">
+                <TextBlock Text="② 감지" FontSize="11"/>
+              </Button>
+              <Border Height="3" CornerRadius="2" Background="{Binding WizardPage, Converter={x:Static conv:StepBarBrushConverter.Instance}, ConverterParameter=2}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="4">
+              <Button Command="{Binding GoPageCommand}" CommandParameter="3" Classes="stepchip">
+                <TextBlock Text="③ 편집" FontSize="11"/>
+              </Button>
+              <Border Height="3" CornerRadius="2" Background="{Binding WizardPage, Converter={x:Static conv:StepBarBrushConverter.Instance}, ConverterParameter=3}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="3" Spacing="4">
+              <Button Command="{Binding GoPageCommand}" CommandParameter="4" Classes="stepchip">
+                <TextBlock Text="④ 실행" FontSize="11"/>
+              </Button>
+              <Border Height="3" CornerRadius="2" Background="{Binding WizardPage, Converter={x:Static conv:StepBarBrushConverter.Instance}, ConverterParameter=4}"/>
+            </StackPanel>
+          </Grid>
+
+          <!-- 하단 내비 (이전/다음) -->
+          <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,12,0,0">
+            <Button Content="◀ 이전" Command="{Binding BackCommand}" Padding="16,8"
+                    IsEnabled="{Binding CanBack}" Classes="flat"/>
+            <Button Grid.Column="2" Content="{Binding WizardNextLabel}" Command="{Binding NextCommand}"
+                  Padding="20,8" Classes="accent" IsEnabled="{Binding CanNext}"/>
+          </Grid>
+
+          <!-- ===== 페이지 1: 열기 ===== -->
+          <!-- 열기 버튼은 상단 바 글로벌 하나만(2026-10-25 중복 제거) — 여기는 안내만 -->
+          <StackPanel Spacing="10" IsVisible="{Binding WizardPage, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}"
+                      VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="📄" FontSize="40" HorizontalAlignment="Center"/>
+            <TextBlock Text="이미지를 열어주세요" FontSize="16" Foreground="#FF1D2129" HorizontalAlignment="Center"/>
+            <TextBlock Text="JPG · PNG · WEBP — 말풍선을 자동 인식합니다" FontSize="12"
+                     Foreground="#8C1D2129" HorizontalAlignment="Center" TextAlignment="Center"/>
+            <TextBlock Text="↑ 상단 바의 📂 열기 — 여러 장 선택하면 모두 배치 대기열에 큐잉" FontSize="11"
+                     Foreground="#591D2129" HorizontalAlignment="Center" TextAlignment="Center"/>
+          </StackPanel>
+
+          <!-- ===== 페이지 2: 감지 ===== -->
+          <StackPanel Spacing="10" IsVisible="{Binding WizardPage, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}">
+            <TextBlock Text="감지 실행" Classes="step"/>
+            <TextBlock Text="말풍선을 클릭-드래그로 선택·이동할 수 있어요. 감지 후 ☑ 여부를 고릅니다."
+                       TextWrapping="Wrap" FontSize="11" Foreground="#8C1D2129"/>
+            <!-- 번역 엔진 런타임 선택 -->
+            <Grid ColumnDefinitions="Auto,*">
+              <TextBlock Text="번역 엔진" FontSize="11" Foreground="#B31D2129" VerticalAlignment="Center"/>
+              <ComboBox Grid.Column="1" Margin="8,0,0,0" HorizontalAlignment="Stretch"
+                      ItemsSource="{Binding TranslateEngineOptions}"
+                      SelectedItem="{Binding SelectedTranslateEngine, Mode=TwoWay}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" FontSize="11"/>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </Grid>
+            <Button Content="⏭  건너뛰고 바로 전체 실행" Command="{Binding Single.RunAllCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,7" IsEnabled="{Binding !AnyBusy}"/>
+            <TextBlock Text="※ [다음: 감지 실행] 을 누르세요 — 하단 다음 버튼" FontSize="10" Foreground="#591D2129"/>
+          </StackPanel>
+
+          <!-- ===== 페이지 3: 편집 ===== -->
+          <DockPanel IsVisible="{Binding WizardPage, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}">
+            <TextBlock DockPanel.Dock="Top" Classes="step" Text="☑한 말풍선만 제거·번역" Margin="0,0,0,6"/>
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+              <Button Content="＋ 추가" Command="{Binding Single.AddInstanceCommand}"/>
+              <Button Content="🗑 삭제" Command="{Binding Single.DeleteSelectedCommand}"/>
+            </StackPanel>
+            <Border DockPanel.Dock="Bottom" Background="#FFF2F3F7" CornerRadius="8" Padding="8,6" Margin="0,6,0,0">
+              <Grid ColumnDefinitions="Auto,*,Auto,*,Auto,*,Auto,*">
+                <TextBlock Text="L" Foreground="#B31D2129" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" Classes="num" Text="{Binding Single.SelectedInstance.Left, Mode=TwoWay}"/>
+                <TextBlock Grid.Column="2" Text="T" Foreground="#B31D2129" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBox Grid.Column="3" Classes="num" Text="{Binding Single.SelectedInstance.Top, Mode=TwoWay}"/>
+                <TextBlock Grid.Column="4" Text="R" Foreground="#B31D2129" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBox Grid.Column="5" Classes="num" Text="{Binding Single.SelectedInstance.Right, Mode=TwoWay}"/>
+                <TextBlock Grid.Column="6" Text="B" Foreground="#B31D2129" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBox Grid.Column="7" Classes="num" Text="{Binding Single.SelectedInstance.Bottom, Mode=TwoWay}"/>
+              </Grid>
+            </Border>
+            <ListBox x:Name="InstanceList" ItemsSource="{Binding Single.Instances}"
+                   SelectedItem="{Binding Single.SelectedInstance, Mode=TwoWay}"
+                   Background="#0A1D2129" BorderThickness="0"
+                   ItemTemplate="{StaticResource InstanceEditTemplate}"/>
+          </DockPanel>
+
+          <!-- ===== 페이지 4: 실행·결과 ===== -->
+          <StackPanel Spacing="10" IsVisible="{Binding WizardPage, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=4}">
+            <TextBlock Text="번역 실행" Classes="step"/>
+            <TextBlock Text="☑ 말풍선 텍스트를 지우고 배경을 채운 뒤, 번역문을 다시 조판합니다." TextWrapping="Wrap"
+                     FontSize="11" Foreground="#8C1D2129"/>
+            <!-- 번역 엔진 런타임 선택(이미지 불러와서 다시 고를 수도 있음) -->
+            <Grid ColumnDefinitions="Auto,*">
+              <TextBlock Text="번역 엔진" FontSize="11" Foreground="#B31D2129" VerticalAlignment="Center"/>
+              <ComboBox Grid.Column="1" Margin="8,0,0,0" HorizontalAlignment="Stretch"
+                      ItemsSource="{Binding TranslateEngineOptions}"
+                      SelectedItem="{Binding SelectedTranslateEngine, Mode=TwoWay}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" FontSize="11"/>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </Grid>
+            <!-- 실행 후 결과 미리보기/저장/되돌리기 -->
+            <Image Source="{Binding Single.Display}" Stretch="Uniform" MaxHeight="320"
+                   IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepAppliedConverter.Instance}}"
+                   Margin="0,6,0,0"/>
+            <TextBlock Text="💾 자동 저장됨 —" FontSize="11" Foreground="#8C1D2129"
+                       IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepAppliedConverter.Instance}}"/>
+            <TextBlock Text="{Binding Single.ResultPath}" FontSize="10" Foreground="#591D2129" TextWrapping="Wrap"
+                       IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepAppliedConverter.Instance}}"/>
+            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center"
+                       IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepAppliedConverter.Instance}}">
+              <Button Content="💾  다른 위치 저장" Command="{Binding SaveResultCommand}"/>
+              <Button Content="↺  다시 편집 (③)" Command="{Binding GoPageCommand}" CommandParameter="3" Classes="flat"/>
+            </StackPanel>
+            <Button Content="✅  번역 실행" Command="{Binding Single.ApplyCommand}"
+                  HorizontalAlignment="Stretch" Classes="accent" Padding="12,9"
+                  IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepNotAppliedConverter.Instance}}"
+                  IsEnabled="{Binding !AnyBusy}"/>
+            <Button Content="🔄  전체 다시 (감지부터)" Command="{Binding Single.RunAllCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,7"
+                  IsVisible="{Binding Single.Step, Converter={x:Static conv:EnumStepAppliedConverter.Instance}}"
+                  IsEnabled="{Binding !AnyBusy}"/>
+          </StackPanel>
+
+        </DockPanel>
+
+        <!-- ===== BATCH: Expander 대기열 — 펼쳐진 장이 캔버스(ActiveEditor)로 올라온다(2026-10-25) ===== -->
+        <DockPanel IsVisible="{Binding IsBatch}">
+          <StackPanel DockPanel.Dock="Top" Spacing="8">
+            <TextBlock Classes="step" Text="대기열 — ①전체 인식 → 통합 설정(JSON) → ②설정 기반 번역·재조판"/>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <!-- ＋ 파일 추가 제거(2026-10-25 사용자 피드백): 상단 '📂 열기'와 대화상자 중복 —
+                   열기에서 여러 장 선택하면 나머지가 자동으로 여기 대기열에 들어온다 -->
+              <Button Content="📂 폴더 추가" Command="{Binding Batch.AddFolderCommand}"/>
+              <Button Content="－ 선택 제거" Command="{Binding Batch.RemoveSelectedCommand}"/>
+            </StackPanel>
+            <!-- ① 인식: OCR 모델만 적재 → 모든 장의 위치·원문 인식 → 통합 설정 파일로 커밋 -->
+            <Button Content="🔍 ① 전체 인식 (OCR→설정)" Command="{Binding Batch.ScanAllCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,9" IsEnabled="{Binding !AnyBusy}"/>
+            <!-- ② 실행: 번역 모델 1회 적재 → 통합 설정을 전체적으로 읽어 번역·재조판 -->
+            <Button Content="⚙ ② 번역·재조판 (설정 기반)" Command="{Binding Batch.TranslateFromConfigCommand}"
+                  HorizontalAlignment="Stretch" Classes="accent" Padding="12,9" IsEnabled="{Binding !AnyBusy}"/>
+            <!-- 폴백: 옛 연속 실행(펼친 장=편집 반영 / 미펼침 장=자동 전 단계) -->
+            <Button Content="▶ 연속 실행 (레거시)" Command="{Binding Batch.RunQueueCommand}"
+                  HorizontalAlignment="Stretch" Padding="12,6" FontSize="11" Classes="flat"
+                  IsEnabled="{Binding !AnyBusy}"/>
+          </StackPanel>
+          <!-- 우측 패딩 12px: 세로 스크롤바가 행 내용(진행률·상태)을 덮지 않게(2026-10-28 가림 신고) -->
+          <ScrollViewer Margin="0,8,12,0" Padding="0,0,4,0" HorizontalScrollBarVisibility="Disabled">
+            <!-- ListBox 전환(2026-10-28): 행 클릭=선택→캔버스가 즉시 그 장으로 전환(ActiveEditor 우선순위=선택>펼침).
+                 Expander 펼침/편집 UX는 그대로 유지. 행 내부에서는 스크롤을 만들어 nested scrollbar를 금지한다
+                 (겹스크롤Inside가 편집행을 가림 — 밖의 스크롤러만 사용). -->
+            <ListBox ItemsSource="{Binding Batch.Queue}" SelectedItem="{Binding Batch.SelectedEntry, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                  <Setter Property="Padding" Value="0"/>
+                  <Setter Property="CornerRadius" Value="8"/>
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+              </ListBox.Styles>
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:BatchEntryViewModel">
+                  <!-- 펼침=인스턴스 편집 노출 / 접힘=비트맵 회수. 편집 상태는 유지. -->
+                  <Expander Classes="page" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Margin="0,0,0,6">
+                    <Expander.Header>
+                      <Grid ColumnDefinitions="*,70,52">
+                        <TextBlock Classes="fname" Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                        <ProgressBar Grid.Column="1" Value="{Binding Progress}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Status}" FontSize="11" VerticalAlignment="Center"
+                                 Foreground="#B31D2129"/>
+                      </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="4" Margin="4,2,4,8">
+                      <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2,0,4">
+                        <TextBlock Text="＋" Foreground="#B31D2129" VerticalAlignment="Center" FontSize="11"/>
+                        <TextBlock Text="{Binding Editor.StageLabel}" FontSize="11" Foreground="#8C1D2129" VerticalAlignment="Center"/>
+                      </StackPanel>
+                      <TextBlock FontSize="10" Foreground="#591D2129" TextTrimming="CharacterEllipsis"
+                                 Text="{Binding Editor.ResultPath, StringFormat='→ {0}'}"
+                                 IsVisible="{Binding Editor.ResultPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                      <!-- 사각형 편집 툴바(2026-10-28 사용자 요청: 배치에서도 OCR 박스 추가/삭제):
+                           ＋는 페이지 중앙 새 박스, 캔버스 클릭-드래그로 위치·크기 조정 가능 -->
+                      <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
+                        <Button Content="＋ 사각형 추가" Command="{Binding Editor.AddInstanceCommand}"
+                              Padding="8,4" FontSize="11"
+                              ToolTip.Tip="새 인식 사각형 추가 — 캔버스에서 드래그로 이동·코너로 크기 조정"/>
+                        <Button Content="🗑 선택 삭제" Command="{Binding Editor.DeleteSelectedCommand}"
+                              Padding="8,4" FontSize="11" Classes="flat"
+                              ToolTip.Tip="선택된 사각형 삭제 (캔버스 또는 아래 행 클릭으로 선택)"/>
+                      </StackPanel>
+                      <!-- 편집 행: 툴바 공유 InstanceEditTemplate (☑/세로/🔄/✕ + 선택 시 슬라이더·원문).
+                           ListBox 전환: 행 클릭=선택→캔버스 하이라이트·인라인 편집 열림(싱글과 동일 UX) -->
+                      <ListBox ItemsSource="{Binding Editor.Instances}"
+                               SelectedItem="{Binding Editor.SelectedInstance, Mode=TwoWay}"
+                               Background="Transparent" BorderThickness="0" Padding="0"
+                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                               ItemTemplate="{StaticResource InstanceEditTemplate}">
+                        <ListBox.Styles>
+                          <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0,2"/>
+                          </Style>
+                        </ListBox.Styles>
+                      </ListBox>
+                      <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,6,0,0">
+                        <Button Content="이 장만 번역 실행" Command="{Binding Editor.ApplyCommand}"
+                              Classes="accent" Padding="10,5" FontSize="11"/>
+                      </StackPanel>
+                    </StackPanel>
+                  </Expander>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </ScrollViewer>
+        </DockPanel>
+
+      </Grid>
+      </Border>
+    </Grid>
+
+    <!-- 실행 중 오버레이 — RowSpan=3 최후자식(z-top): 상단바/스테이터스바 포함 창 전체 덮음 (단일/배치 공용) -->
+    <Border Grid.RowSpan="3" IsVisible="{Binding AnyBusy}" Background="#E6F6F7FA">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                Spacing="12" MaxWidth="420">
+        <TextBlock Text="⏳" FontSize="34" HorizontalAlignment="Center"/>
+        <TextBlock Text="{Binding BusyMessage}" TextWrapping="Wrap" TextAlignment="Center"
+                 FontSize="13" Foreground="#FF1D2129"/>
+        <ProgressBar Value="{Binding BusyProgress}" Minimum="0" Maximum="1"
+                   Height="8" CornerRadius="4" Foreground="#FFFF6D00" Background="#1F000000"
+                   MinWidth="300"/>
+        <TextBlock Text="{Binding BusyProgress, StringFormat=P0}" HorizontalAlignment="Center"
+                 FontSize="12" Foreground="#8C1D2129"/>
+        <Button Content="✕  취소" Command="{Binding CancelAllCommand}"
+                HorizontalAlignment="Center" Padding="20,6"/>
+      </StackPanel>
+    </Border>
+
+  </Grid>
+</Window>

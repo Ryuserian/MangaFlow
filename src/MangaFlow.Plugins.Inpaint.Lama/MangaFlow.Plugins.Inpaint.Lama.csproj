@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- GPU 기본정책: Windows·Linux=CUDA 우선(없으면 런타임 CPU 폴백), macOS=CPU. ORTGpu=false 강제 CPU -->
+    <ORTGpu Condition="'$(ORTGpu)' == '' And !$([MSBuild]::IsOSPlatform('OSX'))">true</ORTGpu>
+    <ORTGpu Condition="'$(ORTGpu)' == ''">false</ORTGpu>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MangaFlow.Core\MangaFlow.Core.csproj" />
+    <ProjectReference Include="..\MangaFlow.Plugins.Ocr.PpOcr\MangaFlow.Plugins.Ocr.PpOcr.csproj" />
+    <!-- OnnxSessionFactory(CUDA 우선·CPU 폴백) 공용 — MangaOcr이 PpOcr 참조하는 것과 동일 패턴 -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" Condition="'$(ORTGpu)' != 'true'" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.31.0" Condition="'$(ORTGpu)' == 'true'" />
+  </ItemGroup>
+
+</Project>

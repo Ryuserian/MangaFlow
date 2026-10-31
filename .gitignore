@@ -487,7 +487,7 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-## MangaTranslator 전용 — 모델 캐시·입력만화·산출물 (공개 금지/무거움)
+## MangaFlow 전용 — 모델 캐시·입력만화·산출물 (공개 금지/무거움)
 models
 models/
 img_src/

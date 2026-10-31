@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MangaFlow.App/MangaFlow.App.csproj" />
+    <Project Path="src/MangaFlow.Core/MangaFlow.Core.csproj" />
+    <Project Path="src/MangaFlow.ModelManager/MangaFlow.ModelManager.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Inpaint.Lama/MangaFlow.Plugins.Inpaint.Lama.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Ocr.VlmOcr/MangaFlow.Plugins.Ocr.VlmOcr.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Ocr.VlmQwen/MangaFlow.Plugins.Ocr.VlmQwen.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Ocr.PpOcr/MangaFlow.Plugins.Ocr.PpOcr.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Render.Skia/MangaFlow.Plugins.Render.Skia.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Translate.QwenGguf/MangaFlow.Plugins.Translate.QwenGguf.csproj" />
+    <Project Path="src/MangaFlow.Plugins.Translate.WebApi/MangaFlow.Plugins.Translate.WebApi.csproj" />
+  </Folder>
+</Solution>
